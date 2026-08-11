@@ -362,18 +362,46 @@ preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
 
 `POST /api/admin/sds/extract` — AI-powered auto-fill for the chemical form.
 
+The vision-language model (VLM) is **provider-agnostic**. Choose any one of four
+providers via the `AI_PROVIDER` env var — the extraction logic, prompt, JSON
+parsing, and field sanitization are identical across all of them.
+
+**Supported providers:**
+
+| `AI_PROVIDER` | Package | Default model | Free tier? | Works on local machine? |
+|---|---|---|---|---|
+| `zai` (default) | `z-ai-web-dev-sdk` | `glm-4.6v` | ✅ Always free | ❌ Sandbox-only (internal API) |
+| `gemini` ⭐ | `@google/generative-ai` | `gemini-1.5-flash` | ✅ 1,500 req/day | ✅ Yes |
+| `openai` | `openai` | `gpt-4o-mini` | ❌ Paid (~$0.01/SDS) | ✅ Yes |
+| `anthropic` | `@anthropic-ai/sdk` | `claude-3-5-sonnet-20241022` | ❌ Paid (~$0.02/SDS) | ✅ Yes |
+
+**Setup:**
+
+1. **On the Z.ai cloud sandbox:** No setup needed. `AI_PROVIDER=zai` is the default and `/etc/.z-ai-config` is pre-configured.
+2. **On your local machine:** Pick a provider (Gemini recommended — free). Install the package, get an API key, and set the env vars in `.env`:
+   ```bash
+   # Example: Gemini
+   bun add @google/generative-ai
+   # Then in .env:
+   AI_PROVIDER=gemini
+   GEMINI_API_KEY=your-key-from-aistudio.google.com/apikey
+   ```
+
 **Flow:**
 ```
 Admin uploads PDF
+       ↓
+[0] assertProviderConfigured()  — fail fast (< 100ms) if API key missing
        ↓
 [1] Validate: magic bytes (%PDF-), MIME (application/pdf), extension (.pdf), size (≤10MB)
        ↓
 [2] rasterizePdfToPngs()  (pdfjs-dist + @napi-rs/canvas — pure JS, no system deps)
      Renders first 5 PDF pages to PNG buffers at ~150 DPI
        ↓
-[3] zai.chat.completions.createVision()  (send all page images in one call)
-     Prompt asks for JSON with 15 fields + provides valid enum values
-     for signalWord, ghsPictograms, hazardClasses so VLM maps correctly
+[3] callVlm(images, prompt)  → src/lib/ai-vlm.ts
+     Dispatches to the configured provider (zai / gemini / openai / anthropic).
+     Each provider wraps images as base64 + sends the same extraction prompt.
+     Returns: { text, provider, model }
        ↓
 [4] Parse VLM response: strip markdown fences, JSON.parse, fallback extraction
        ↓
@@ -407,13 +435,38 @@ Admin uploads PDF
 }
 ```
 
+**Error handling:**
+
+| Scenario | HTTP | Response |
+|---|---|---|
+| Not authenticated | 401 | `{ success: false, error: "Unauthorized" }` |
+| Provider API key missing (e.g. `GEMINI_API_KEY` unset) | 503 | `{ success: false, error: "AI_PROVIDER=gemini is set but GEMINI_API_KEY is missing. Get a free key at https://aistudio.google.com/apikey and add it to your .env file." }` |
+| Provider npm package not installed | 503 | `{ success: false, error: "AI_PROVIDER=gemini requires the @google/generative-ai package. Install it with: bun add @google/generative-ai" }` |
+| Provider API call failed (network / auth / rate limit) | 502 | `{ success: false, error: "Gemini request failed: <details>" }` |
+| VLM returned invalid JSON | 502 | `{ success: false, error: "AI response was not valid JSON." }` |
+
 **Key files:**
-- `src/app/api/admin/sds/extract/route.ts` — the API endpoint
-- `src/components/admin/chemical-manager.tsx` — the frontend `handleAutoFill()` function + "Auto-fill from PDF" button + review banner
+- `src/lib/ai-vlm.ts` — **the provider abstraction.** Exports `callVlm(images, prompt)`, `resolveProvider()`, `assertProviderConfigured()`, and the `AiConfigError` / `AiRequestError` error classes. Add new providers here.
+- `src/app/api/admin/sds/extract/route.ts` — the API endpoint. Calls `callVlm()`; doesn't know or care which provider is configured.
+- `src/lib/pdf-rasterize.ts` — pure-JS PDF → PNG renderer (pdfjs-dist + @napi-rs/canvas).
+- `src/components/admin/chemical-manager.tsx` — the frontend `handleAutoFill()` function + "Auto-fill from PDF" button + review banner.
+
+**Adding a new provider:**
+
+1. Add the provider name to the `AiProvider` type in `src/lib/ai-vlm.ts`.
+2. Add a branch in `callVlm()` that calls a new `callYourProvider()` function.
+3. Implement `callYourProvider(images, prompt)` — late-import the SDK, build the request in the provider's format, return `{ text, provider, model }`.
+4. Add the API key check to `assertProviderConfigured()`.
+5. Add the env vars to `.env.example` and document above.
+6. Add the package to `next.config.ts` `serverExternalPackages` if it ships native binaries.
 
 **System dependency:** None. PDF rasterization is handled by `pdfjs-dist` + `@napi-rs/canvas` (both pure npm packages with pre-built native binaries). No Poppler, no `sudo`, no system packages — just `bun install`.
 
-**Cost:** Free — uses the in-house `z-ai-web-dev-sdk` VLM service. Each extraction uses ~3,000-10,000 tokens depending on PDF length.
+**Cost:**
+- `zai` — Free (in-house service, sandbox-only).
+- `gemini` — Free tier: 1,500 requests/day on `gemini-1.5-flash`. A lab with 200 SDS PDFs will never exhaust this.
+- `openai` — ~$0.01 per extraction on `gpt-4o-mini` (~3K-10K tokens).
+- `anthropic` — ~$0.02 per extraction on `claude-3-5-sonnet`.
 
 ### Auth
 | Method | Path | Purpose |
@@ -661,6 +714,9 @@ Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hoo
 | Dexie schema version conflict | Old client DB version | Bump Dexie schema version in `src/lib/local-db.ts` with an upgrade function |
 | Service worker not updating | Old SW cached | Bump `CACHE_VERSION` in `public/sw.js`; user will get new SW on next load |
 | `spawn pdftoppm ENOENT` when admin clicks "Auto-fill from PDF" | ~~Poppler not installed~~ **Fixed** — extraction now uses pure-JS `pdfjs-dist` + `@napi-rs/canvas` (no system deps). If you see this error, you're on an old version — pull latest and `bun install`. |
+| `Extraction failed: Configuration file not found or invalid` | The default `AI_PROVIDER=zai` only works inside the Z.ai cloud sandbox. On a local machine, set `AI_PROVIDER=gemini` (or `openai` / `anthropic`) + the matching API key in `.env`. See [§ 6.1](#61-ai-sds-extraction-pipeline). |
+| `AI_PROVIDER=gemini is set but GEMINI_API_KEY is missing` | You set `AI_PROVIDER=gemini` in `.env` but didn't add the API key. Get a free key at https://aistudio.google.com/apikey, then set `GEMINI_API_KEY=...` in `.env` and restart `bun run dev`. |
+| `AI_PROVIDER=gemini requires the @google/generative-ai package` | You set `AI_PROVIDER=gemini` but didn't install the SDK. Run: `bun add @google/generative-ai`. (Same pattern for `openai` → `bun add openai`, `anthropic` → `bun add @anthropic-ai/sdk`.) |
 | Public user sees stale placeholder PDF after admin uploads the real one | Browser HTTP cache or stale IndexedDB blob | Fixed in code: download route sends `no-store`, `getSdsBlobForChemical()` always fetches fresh when online. If it recurs, hard-refresh the page and check the SDS `version` in Dexie |
 | Preview shows blank "Z" screen | Dev server not running | `bun run dev` (this is the most common "it's loading" report) |
 

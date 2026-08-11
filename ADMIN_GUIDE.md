@@ -135,8 +135,20 @@ Manage the actual PDF files. Each chemical has exactly one SDS document (1:1).
 - **Works with both scanned and digital PDFs** — the AI uses OCR (optical character recognition) to read scanned documents.
 - **Always review** — the AI is ~90% accurate but safety data must be 100% correct. Check hazard classes and signal words especially carefully.
 - **One PDF at a time** — for bulk imports, add chemicals one by one with this feature. (A future Excel bulk-import feature is planned.)
-- **No cost** — the AI service is built-in and free.
+- **No cost** — on the Z.ai cloud sandbox (the Preview Panel), the AI service is built-in and free. On a local installation, set `AI_PROVIDER=gemini` in `.env` for the free Google Gemini tier (1,500 requests/day). See the **Setup for local development** note below.
 - **Your PDF is not stored** during extraction — it's converted to images, read by the AI, then the temporary files are deleted. (The PDF is only permanently stored if you also upload it via the SDS tab.)
+
+### Setup for local development (when not using the sandbox)
+
+The default AI provider (`zai`) only works inside the Z.ai cloud sandbox. If you're running the app on your own machine and want the AI auto-fill to work, pick one of these providers and configure it in your `.env` file:
+
+| Provider | Cost | Setup |
+|---|---|---|
+| **Google Gemini** ⭐ recommended | Free (1,500/day) | 1. `bun add @google/generative-ai`<br>2. Get a key: https://aistudio.google.com/apikey<br>3. In `.env`: `AI_PROVIDER=gemini` and `GEMINI_API_KEY=<your-key>` |
+| OpenAI | ~$0.01 per SDS | 1. `bun add openai`<br>2. Get a key: https://platform.openai.com/api-keys<br>3. In `.env`: `AI_PROVIDER=openai` and `OPENAI_API_KEY=<your-key>` |
+| Anthropic Claude | ~$0.02 per SDS | 1. `bun add @anthropic-ai/sdk`<br>2. Get a key: https://console.anthropic.com/settings/keys<br>3. In `.env`: `AI_PROVIDER=anthropic` and `ANTHROPIC_API_KEY=<your-key>` |
+
+After changing `.env`, restart `bun run dev`. On the sandbox, you don't need to do anything — the default `zai` provider is pre-configured.
 
 ---
 
@@ -182,6 +194,9 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 | Field user still sees the old placeholder PDF after you uploaded the real one | IndexedDB cache lag (fixed) | The public "View SDS PDF" button now always fetches fresh from the server when online. Ask the user to hard-refresh once. Confirm the SDS `version` incremented in the admin SDS tab. |
 | Dashboard shows 0 chemicals | Database not seeded | `bun run db:push && bun run db:seed`, then restart |
 | "Auto-fill failed: spawn pdftoppm ENOENT" | ~~Poppler not installed~~ **Fixed** — the app now uses a pure-JavaScript PDF renderer. If you see this error, pull the latest code and run `bun install`. |
+| "Extraction failed: Configuration file not found or invalid" | You're running on a local machine. The default `zai` provider only works on the Z.ai cloud sandbox. Set `AI_PROVIDER=gemini` + `GEMINI_API_KEY` in `.env` (see [§ 4.4 Setup for local development](#setup-for-local-development-when-not-using-the-sandbox)). |
+| "AI_PROVIDER=gemini is set but GEMINI_API_KEY is missing" | You set the provider but didn't add the API key. Get a free key at https://aistudio.google.com/apikey, set `GEMINI_API_KEY=...` in `.env`, restart `bun run dev`. |
+| "AI_PROVIDER=gemini requires the @google/generative-ai package" | SDK not installed. Run `bun add @google/generative-ai`. |
 
 ---
 

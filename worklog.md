@@ -536,3 +536,57 @@ Stage Summary:
 - On a local machine: cannot work (no .z-ai-config + internal API unreachable). The error message is now self-documenting and tells the user to test via the Preview Panel.
 - All other features (chemical CRUD, SDS upload/view, sync, search, emergency mode) work on both local and sandbox — only AI auto-fill is sandbox-only.
 - File modified: src/app/api/admin/sds/extract/route.ts (added ZAI.create() try/catch with config-error detection + clear 503 message).
+
+---
+Task ID: REFACTOR-provider-agnostic-vlm
+Agent: Orchestrator
+Task: Make the AI auto-fill feature provider-agnostic so the user can plug in any vision API (Gemini / OpenAI / Anthropic) instead of being locked to the sandbox-only z-ai-web-dev-sdk.
+
+Work Log:
+- Created src/lib/ai-vlm.ts — the provider abstraction layer:
+  * Exports: callVlm(images, prompt), resolveProvider(), assertProviderConfigured(), AiConfigError, AiRequestError, AiProvider type, VlmResult interface.
+  * Four providers supported: zai (default, in-house, sandbox-only), gemini (@google/generative-ai, free tier 1500/day), openai (gpt-4o-mini), anthropic (claude-3-5-sonnet).
+  * Late imports for non-default providers so they're optional — only installed when the user picks that provider.
+  * Each provider wraps the image buffers as base64 + sends the same extraction prompt, returns { text, provider, model }.
+  * Provider resolution via AI_PROVIDER env var (defaults to "zai" for backward compat with sandbox).
+  * assertProviderConfigured() validates the required API key for each provider and throws AiConfigError with actionable install/setup instructions if missing.
+- Refactored src/app/api/admin/sds/extract/route.ts:
+  * Removed direct `import ZAI from "z-ai-web-dev-sdk"` and all inline VLM call code.
+  * Replaced with: resolveProvider() → assertProviderConfigured() (fail-fast before rasterization, <100ms) → rasterizePdfToPngs() → callVlm(images, prompt).
+  * Error handling: AiConfigError → 503 with actionable message, AiRequestError → 502 (or upstream status), unknown → 500.
+  * Removed the now-unused pageImages base64 conversion (callVlm takes raw Buffers; each provider encodes as needed).
+  * Updated header comment to document provider selection.
+- Created src/types/ai-providers.d.ts — declares @google/generative-ai, openai, @anthropic-ai/sdk as `any` modules so TypeScript doesn't error when the packages aren't installed (they're optional).
+- Updated .env.example with comprehensive AI_PROVIDER section: documents all 4 providers, includes setup instructions, API key placeholders for each (commented out by default).
+- Updated DEVELOPER_GUIDE.md § 6.1:
+  * Added provider comparison table (provider / package / default model / free tier / works locally).
+  * Added setup instructions for both sandbox and local development.
+  * Updated flow diagram to show the new callVlm() step.
+  * Added error handling table with HTTP codes and example messages.
+  * Added "Adding a new provider" section with 6-step guide.
+  * Updated cost section per provider.
+  * Added 3 new troubleshooting rows for the new error messages.
+- Updated ADMIN_GUIDE.md § 4.4:
+  * Updated "No cost" note to clarify sandbox vs local.
+  * Added "Setup for local development" section with provider comparison table and step-by-step setup for each provider.
+  * Added 3 new troubleshooting rows.
+- Verified:
+  * bun run lint → 0 errors, 0 warnings.
+  * npx tsc --noEmit → only pre-existing pdf-rasterize.ts errors remain (unrelated to changes).
+  * Unit test (9 cases): resolveProvider() + assertProviderConfigured() work correctly for all 4 providers + invalid value fallback + missing-key detection.
+  * End-to-end sandbox test: logged in as admin, POSTed real SDS PDF → HTTP 200 in 7.2s with full Sodium Hydroxide extraction. Default zai provider still works unchanged.
+- Files created/modified:
+  - CREATED src/lib/ai-vlm.ts (290 lines)
+  - CREATED src/types/ai-providers.d.ts
+  - MODIFIED src/app/api/admin/sds/extract/route.ts
+  - MODIFIED .env.example
+  - MODIFIED DEVELOPER_GUIDE.md
+  - MODIFIED ADMIN_GUIDE.md
+
+Stage Summary:
+- The AI auto-fill feature is now provider-agnostic. The user can pick any vision API by setting AI_PROVIDER in .env + installing the matching SDK + adding the API key.
+- Default behavior unchanged: AI_PROVIDER=zai (or unset) → in-house z-ai-web-dev-sdk, works on sandbox, no setup needed.
+- For local development: AI_PROVIDER=gemini (recommended, free 1500/day) + bun add @google/generative-ai + GEMINI_API_KEY from https://aistudio.google.com/apikey.
+- The fail-fast config check means users see an actionable error in <100ms instead of waiting 10s for rasterization before discovering the key is missing.
+- All error messages are self-documenting: they tell the user exactly which package to install and where to get the API key.
+- Architecture is extensible: adding a 5th provider is a 6-step process documented in DEVELOPER_GUIDE.md § 6.1.

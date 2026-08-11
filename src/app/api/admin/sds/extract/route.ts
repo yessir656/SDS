@@ -6,13 +6,22 @@
 //     1. Validates the file (auth + magic bytes + MIME + extension + size).
 //     2. Rasterizes the first 5 pages to PNG using a pure-JavaScript renderer
 //        (pdfjs-dist + @napi-rs/canvas) — NO system dependencies required.
-//     3. Base64-encodes each PNG.
-//     4. Sends all images to the in-house VLM (z-ai-web-dev-sdk) with a
-//        structured extraction prompt that maps SDS fields to our schema.
-//     5. Parses the JSON response, validates enum values, sanitizes strings.
-//     6. Returns { success: true, data: { ...fields } }.
+//     3. Sends all images + a structured extraction prompt to the configured
+//        VLM provider via src/lib/ai-vlm.ts. Provider is selected by the
+//        AI_PROVIDER env var (zai | gemini | openai | anthropic).
+//     4. Parses the JSON response, validates enum values, sanitizes strings.
+//     5. Returns { success: true, data: { ...fields } }.
 //
 //   Admin-only. Server-side authorization enforced via requireAdmin().
+//
+//   Provider selection:
+//     AI_PROVIDER=zai       (default) — in-house z-ai-web-dev-sdk, sandbox-only
+//     AI_PROVIDER=gemini              — Google Gemini, free tier, works locally
+//     AI_PROVIDER=openai              — OpenAI gpt-4o-mini, works locally
+//     AI_PROVIDER=anthropic           — Anthropic Claude, works locally
+//
+//   See src/lib/ai-vlm.ts for the provider abstraction and DEVELOPER_GUIDE.md
+//   §6 for setup instructions.
 // ============================================================================
 
 import { NextResponse } from "next/server";
@@ -24,7 +33,13 @@ import {
 } from "@/lib/validation";
 import { isPdf } from "@/lib/storage";
 import { rasterizePdfToPngs } from "@/lib/pdf-rasterize";
-import ZAI from "z-ai-web-dev-sdk";
+import {
+  callVlm,
+  resolveProvider,
+  assertProviderConfigured,
+  AiConfigError,
+  AiRequestError,
+} from "@/lib/ai-vlm";
 
 // Allow this route up to 60s — VLM extraction of multi-page PDFs takes ~10-15s.
 export const maxDuration = 60;
@@ -252,18 +267,34 @@ export async function POST(request: Request) {
   }
 
   // ---------------------------------------------------------------------------
+  // Fail fast on missing AI provider config — BEFORE rasterizing the PDF.
+  // This way the user gets an immediate, actionable error (< 100ms) instead
+  // of waiting 10s for rasterization then seeing a config error.
+  // ---------------------------------------------------------------------------
+  const provider = resolveProvider();
+  try {
+    assertProviderConfigured(provider);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { success: false, error: msg },
+      { status: 503 }
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // Rasterize the PDF to PNG images using a pure-JavaScript renderer.
   // No system dependencies (Poppler/pdftoppm) required — pdfjs-dist +
   // @napi-rs/canvas run entirely in-process.
   // ---------------------------------------------------------------------------
-  let pageImages: string[];
+  let pageImages: Buffer[];
   try {
-    const pngBuffers = await rasterizePdfToPngs(buffer, {
+    pageImages = await rasterizePdfToPngs(buffer, {
       maxPages: 5,
       scale: 2.0, // ≈ 150 DPI on a standard 72 DPI PDF viewport
     });
 
-    if (pngBuffers.length === 0) {
+    if (pageImages.length === 0) {
       return NextResponse.json(
         {
           success: false,
@@ -272,9 +303,6 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
-
-    // Base64-encode each PNG for the VLM image_url content blocks.
-    pageImages = pngBuffers.map((b) => b.toString("base64"));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
@@ -287,139 +315,104 @@ export async function POST(request: Request) {
   }
 
   // ---------------------------------------------------------------------------
-  // Build the VLM message and call createVision.
+  // Send the page images + extraction prompt to the configured VLM provider.
+  // The provider abstraction (src/lib/ai-vlm.ts) handles zai / gemini / openai
+  // / anthropic. We get back a raw text string expected to contain JSON.
   // ---------------------------------------------------------------------------
-  let zai;
+  let rawResponse: string;
   try {
-    zai = await ZAI.create();
+    const result = await callVlm(pageImages, EXTRACTION_PROMPT);
+    rawResponse = result.text;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // The SDK throws this exact message when no .z-ai-config file is found in
-    // any of the 3 search paths (project root, home dir, /etc). This happens
-    // when the app is run outside the Z.ai cloud sandbox — the in-house VLM
-    // service is only reachable from inside the sandbox.
-    if (msg.includes("Configuration file not found")) {
+    // AiConfigError — provider credentials missing or invalid.
+    if (err instanceof AiConfigError) {
       return NextResponse.json(
-        {
-          success: false,
-          error:
-            "AI auto-fill is only available in the Z.ai cloud sandbox (the Preview Panel). The vision model service is not reachable from a local development machine. Please test this feature via the Preview Panel.",
-        },
+        { success: false, error: err.message },
         { status: 503 }
       );
     }
+    // AiRequestError — the API call itself failed (network / auth / rate limit).
+    if (err instanceof AiRequestError) {
+      return NextResponse.json(
+        { success: false, error: err.message },
+        { status: err.status && err.status >= 400 && err.status < 600 ? err.status : 502 }
+      );
+    }
+    // Unknown error — wrap generically.
+    const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { success: false, error: `AI service unavailable: ${msg}` },
+      { success: false, error: `AI extraction failed: ${msg}` },
+      { status: 500 }
+    );
+  }
+
+  if (!rawResponse) {
+    return NextResponse.json(
+      { success: false, error: "AI returned an empty response." },
       { status: 502 }
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Parse + sanitize the VLM output.
+  // ---------------------------------------------------------------------------
+  let parsed: unknown = null;
   try {
-    const content: Array<
-      | { type: "text"; text: string }
-      | { type: "image_url"; image_url: { url: string } }
-    > = [
-      { type: "text", text: EXTRACTION_PROMPT },
-      ...pageImages.map((b64) => ({
-        type: "image_url" as const,
-        image_url: { url: `data:image/png;base64,${b64}` },
-      })),
-    ];
-
-    let rawResponse: string;
-    try {
-      const resp = await zai.chat.completions.createVision({
-        model: "glm-4.6v",
-        messages: [{ role: "user", content }],
-        thinking: { type: "disabled" },
-      } as Parameters<typeof zai.chat.completions.createVision>[0]);
-      rawResponse = resp?.choices?.[0]?.message?.content ?? "";
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json(
-        {
-          success: false,
-          error: `AI extraction failed: ${msg}`,
-        },
-        { status: 502 }
-      );
-    }
-
-    if (!rawResponse) {
-      return NextResponse.json(
-        { success: false, error: "AI returned an empty response." },
-        { status: 502 }
-      );
-    }
-
-    // ---------------------------------------------------------------------------
-    // Parse + sanitize the VLM output.
-    // ---------------------------------------------------------------------------
-    let parsed: unknown = null;
-    try {
-      const jsonStr = extractJson(rawResponse);
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "AI response was not valid JSON.",
-        },
-        { status: 502 }
-      );
-    }
-
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "AI response was not a JSON object.",
-        },
-        { status: 502 }
-      );
-    }
-
-    const obj = parsed as Record<string, unknown>;
-
-    // Sanitize signalWord — default to "danger" if invalid.
-    const rawSignal = asString(obj.signalWord).toLowerCase();
-    const signalWord: "danger" | "warning" = VALID_SIGNAL_WORDS.has(rawSignal as "danger" | "warning")
-      ? (rawSignal as "danger" | "warning")
-      : "danger";
-
-    // Sanitize pictograms + hazard classes against enum sets.
-    const rawPictograms = asStringArray(obj.ghsPictograms);
-    const ghsPictograms = filterValid(rawPictograms, VALID_GHS_PICTOGRAMS);
-
-    const rawHazardClasses = asStringArray(obj.hazardClasses);
-    const hazardClasses = filterValid(rawHazardClasses, VALID_HAZARD_CLASSES);
-
-    const data = {
-      chemicalName: asString(obj.chemicalName),
-      casNumber: asString(obj.casNumber),
-      formula: asString(obj.formula),
-      tradeName: asString(obj.tradeName),
-      manufacturer: asString(obj.manufacturer),
-      supplier: asString(obj.supplier),
-      signalWord,
-      ghsPictograms,
-      hazardClasses,
-      storageLocation: asString(obj.storageLocation),
-      safetyInstructions: asString(obj.safetyInstructions),
-      emergencyContact: asString(obj.emergencyContact),
-      personalProtectiveEquipment: asStringArray(obj.personalProtectiveEquipment),
-      firstAidMeasures: asString(obj.firstAidMeasures),
-      firefightingMeasures: asString(obj.firefightingMeasures),
-      accidentalReleaseMeasures: asString(obj.accidentalReleaseMeasures),
-    };
-
-    return NextResponse.json({ success: true, data });
-  } catch (err) {
-    // Catch-all for any unhandled error in the VLM / parsing stages.
-    const msg = err instanceof Error ? err.message : String(err);
+    const jsonStr = extractJson(rawResponse);
+    parsed = JSON.parse(jsonStr);
+  } catch {
     return NextResponse.json(
-      { success: false, error: `Extraction failed: ${msg}` },
-      { status: 500 }
+      {
+        success: false,
+        error: "AI response was not valid JSON.",
+      },
+      { status: 502 }
     );
   }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "AI response was not a JSON object.",
+      },
+      { status: 502 }
+    );
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  // Sanitize signalWord — default to "danger" if invalid.
+  const rawSignal = asString(obj.signalWord).toLowerCase();
+  const signalWord: "danger" | "warning" = VALID_SIGNAL_WORDS.has(rawSignal as "danger" | "warning")
+    ? (rawSignal as "danger" | "warning")
+    : "danger";
+
+  // Sanitize pictograms + hazard classes against enum sets.
+  const rawPictograms = asStringArray(obj.ghsPictograms);
+  const ghsPictograms = filterValid(rawPictograms, VALID_GHS_PICTOGRAMS);
+
+  const rawHazardClasses = asStringArray(obj.hazardClasses);
+  const hazardClasses = filterValid(rawHazardClasses, VALID_HAZARD_CLASSES);
+
+  const data = {
+    chemicalName: asString(obj.chemicalName),
+    casNumber: asString(obj.casNumber),
+    formula: asString(obj.formula),
+    tradeName: asString(obj.tradeName),
+    manufacturer: asString(obj.manufacturer),
+    supplier: asString(obj.supplier),
+    signalWord,
+    ghsPictograms,
+    hazardClasses,
+    storageLocation: asString(obj.storageLocation),
+    safetyInstructions: asString(obj.safetyInstructions),
+    emergencyContact: asString(obj.emergencyContact),
+    personalProtectiveEquipment: asStringArray(obj.personalProtectiveEquipment),
+    firstAidMeasures: asString(obj.firstAidMeasures),
+    firefightingMeasures: asString(obj.firefightingMeasures),
+    accidentalReleaseMeasures: asString(obj.accidentalReleaseMeasures),
+  };
+
+  return NextResponse.json({ success: true, data });
 }
