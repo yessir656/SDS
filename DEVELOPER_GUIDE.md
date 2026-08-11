@@ -6,6 +6,112 @@
 
 ---
 
+## 0. Quick Start — How to Run This Project
+
+> Read this section first. It covers everything from a fresh `git clone` to a running app.
+
+### 0.1 Prerequisites
+
+| Requirement | Why | Install |
+|---|---|---|
+| **Bun** (required) | The `db:seed` script and production `start` script run TypeScript / the standalone server via Bun. npm/node alone will **not** work. | https://bun.sh/docs/installation |
+| **Node.js 18+** | Next.js 16 needs it. Bun usually bundles a compatible runtime, but having Node helps with tooling. | https://nodejs.org/ |
+| **Git** | To clone the repo. | https://git-scm.com/ |
+
+> **Windows users:** Install Bun with PowerShell (`irm bun.sh/install.ps1 | iex`). All commands below work in **Git Bash** or **WSL**. If you only have CMD/PowerShell, the `dev` script still works (it's just `next dev -p 3000`), but `db:seed` needs Bun regardless.
+
+### 0.2 Step-by-Step (fresh clone)
+
+```bash
+# 1. Clone the repository
+git clone <your-repo-url> sds-chem
+cd sds-chem
+
+# 2. Install dependencies with Bun (do NOT use npm install)
+bun install
+
+# 3. Create your environment file from the template
+cp .env.example .env
+
+# 4. Edit .env — set these values:
+#    - ADMIN_EMAIL         (your admin login email)
+#    - ADMIN_PASSWORD      (a strong password — will be bcrypt-hashed)
+#    - NEXTAUTH_SECRET     (generate one — see the comment in .env.example)
+#    - DATABASE_URL        (already set to ./db/custom.db — leave as-is)
+#    - NEXTAUTH_URL        (already http://localhost:3000 — leave as-is)
+#
+#    Generate a NEXTAUTH_SECRET with:
+#      bun -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'
+
+# 5. Create the SQLite database + tables
+bun run db:push
+
+# 6. Seed the database:
+#    - Creates the admin user from ADMIN_EMAIL / ADMIN_PASSWORD
+#    - Imports the 14 seed chemicals
+#    - Generates a placeholder SDS PDF for each chemical
+bun run db:seed
+
+# 7. Start the dev server
+bun run dev
+```
+
+Open **http://localhost:3000** in your browser. You should see the chemical catalog with 14 chemicals.
+
+### 0.3 Accessing the admin dashboard
+
+1. Go to **http://localhost:3000/admin/login**
+2. Sign in with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` you set in `.env`.
+3. You'll be redirected to `/admin` — the dashboard with Overview / Chemicals / SDS tabs.
+
+### 0.4 Why `npm run dev` doesn't work (and how to fix it)
+
+If you already ran `npm install` and `npm run dev`, you likely hit one of these:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `npm run dev` fails with `tee: command not found` | Old script used a Unix-only `tee` pipe. **This has been fixed** — update to the latest code, or run `npx next dev -p 3000` directly. | `bun install` (or `npm install`) on latest code, then `bun run dev` |
+| `npm run db:seed` fails with `SyntaxError` or `Cannot find module` | The seed script is TypeScript run via Bun. Node/npm can't execute `.ts` files directly. | Install Bun, then run `bun run db:seed` |
+| App loads but shows "Database Error" / 0 chemicals | The database hasn't been created/seeded yet. | Run `bun run db:push && bun run db:seed` |
+| `PrismaClientInitializationError` | `DATABASE_URL` points to a path that doesn't exist on your machine. | Make sure `.env` has `DATABASE_URL=file:./db/custom.db` (relative path). Run `bun run db:push`. |
+| 401 on every admin API | `NEXTAUTH_SECRET` is missing or the `.env` wasn't loaded. | Set `NEXTAUTH_SECRET` in `.env`; restart `bun run dev`. |
+| Login fails with "Invalid email or password" | Admin user not created, or `.env` credentials don't match what's in the DB. | Run `bun run db:seed` again (it's idempotent — updates the admin to match `.env`). |
+
+### 0.5 Migrating from npm to Bun (if you already ran npm install)
+
+If you already ran `npm install`, you can clean up and switch to Bun:
+
+```bash
+# Remove npm's node_modules and lockfile
+rm -rf node_modules package-lock.json
+
+# Install with Bun
+bun install
+
+# Continue with step 5 onwards (db:push, db:seed, dev)
+bun run db:push
+bun run db:seed
+bun run dev
+```
+
+> **Note:** `bun install` reads the same `package.json` and creates `bun.lockb` instead of `package-lock.json`. Both are fine; just don't mix them.
+
+### 0.6 Quick command reference
+
+| Command | What it does |
+|---|---|
+| `bun install` | Install dependencies |
+| `bun run dev` | Start dev server on http://localhost:3000 |
+| `bun run lint` | Run ESLint |
+| `bun run db:push` | Create/update SQLite schema from `prisma/schema.prisma` |
+| `bun run db:seed` | Create admin user + seed 14 chemicals (idempotent) |
+| `bun run db:generate` | Regenerate Prisma Client after schema changes |
+| `bun run db:reset` | ⚠️ Drop and recreate the database (destroys data) |
+| `bun run build` | Production build (Unix-only due to `cp -r`) |
+| `bun run start` | Run the production standalone server (after `build`) |
+
+---
+
 ## 1. Tech Stack
 
 | Layer | Technology |
@@ -389,22 +495,16 @@ bun run start        # Run the standalone server (NODE_ENV=production)
 
 ## 11. First-Time Setup (Fresh Clone)
 
+> **See [Section 0 — Quick Start](#0-quick-start--how-to-run-this-project) above** for the complete, step-by-step guide including prerequisites, the `npm` → `bun` migration path, and common error fixes.
+
+The short version:
+
 ```bash
-# 1. Install deps
-bun install
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env: set DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD, NEXTAUTH_SECRET, NEXTAUTH_URL
-
-# 3. Create the SQLite database + tables
-bun run db:push
-
-# 4. Seed admin + 14 chemicals
-bun run db:seed
-
-# 5. Start dev server
-bun run dev
+bun install            # NOT npm install
+cp .env.example .env   # then edit .env (set ADMIN_PASSWORD + NEXTAUTH_SECRET)
+bun run db:push        # create SQLite tables
+bun run db:seed        # create admin + 14 chemicals
+bun run dev            # start on http://localhost:3000
 ```
 
 ---

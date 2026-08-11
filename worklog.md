@@ -290,3 +290,31 @@ Stage Summary:
 - The app is fully functional end-to-end: public PWA (catalog/search/detail/emergency/offline), admin login, admin dashboard (Overview/Chemicals/SDS tabs), delta sync API, secure SDS upload, and Prisma-backed source-of-truth DB with 14 seeded chemicals.
 - Three final deliverables produced: this session log, ADMIN_GUIDE.md, DEVELOPER_GUIDE.md.
 - Project is complete.
+
+---
+Task ID: RUN-DOCS
+Agent: Orchestrator
+Task: Fix "how to run" issues for cloned project + add Quick Start section to DEVELOPER_GUIDE.md
+
+Work Log:
+- User cloned the project, ran `npm install` + `npm run dev`, and it failed. Asked for runnable instructions in the developer guide.
+- Diagnosed three root causes:
+  1. Project requires **Bun** (the `db:seed` script runs `bun run scripts/seed-db.ts` — a TypeScript file node can't execute directly).
+  2. The `dev` script used a Unix-only `tee` pipe (`next dev -p 3000 2>&1 | tee dev.log`) which fails on Windows CMD/PowerShell.
+  3. `.env.example` had a sandbox-specific absolute `DATABASE_URL=file:/home/z/my-project/db/custom.db` that doesn't exist on a fresh clone.
+- Fixed `package.json` scripts: removed `tee` pipe from `dev` and `start` so they are cross-platform (`"dev": "next dev -p 3000"`, `"start": "NODE_ENV=production bun .next/standalone/server.js"`).
+- Fixed `.env.example`: changed `DATABASE_URL` to a relative path (`file:./db/custom.db`) so Prisma creates the folder on any machine; added clear header comments with the exact run sequence.
+- Added a new **Section 0: Quick Start — How to Run This Project** to the top of DEVELOPER_GUIDE.md covering:
+  * 0.1 Prerequisites table (Bun required, with Windows install notes)
+  * 0.2 Step-by-step fresh-clone walkthrough (clone → bun install → cp .env.example .env → edit → db:push → db:seed → dev)
+  * 0.3 Accessing the admin dashboard
+  * 0.4 "Why npm run dev doesn't work" troubleshooting table (6 common symptoms + fixes)
+  * 0.5 Migrating from npm to Bun (cleanup steps for users who already ran npm install)
+  * 0.6 Quick command reference table
+- Updated the old Section 11 (First-Time Setup) to point at the new Section 0 instead of duplicating content.
+- Restarted the dev server with the new (tee-free) script: `HTTP 200 in 3.06s`, page fully renders (verified via Agent Browser — all 14 chemical cards present).
+
+Stage Summary:
+- Three fixes shipped: cross-platform dev/start scripts, relative DATABASE_URL in .env.example, comprehensive Quick Start docs.
+- The app runs identically whether invoked via `bun run dev` (recommended) or `npx next dev` — the only Bun-hard requirement is `bun run db:seed`.
+- DEVELOPER_GUIDE.md now leads with a clone-to-running guide that a brand-new developer can follow without hitting the `npm` pitfalls.
