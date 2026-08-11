@@ -514,3 +514,25 @@ Stage Summary:
 - Clone + `bun install` + `bun run dev` → auto-fill works on any OS (macOS, Linux, Windows) without sudo/brew.
 - Extraction time increased slightly (~18s vs ~14s with pdftoppm) due to JS-based rendering, but well within the 60s timeout.
 - The z-ai-web-dev-sdk AI service was never the problem — it auto-configures with no env vars. The issue was always the PDF-to-image step.
+
+---
+Task ID: BUGFIX-zai-config-local
+Agent: Orchestrator
+Task: User reported "Extraction failed: Configuration file not found or invalid" error when clicking Auto-fill from PDF.
+
+Work Log:
+- Analyzed user screenshot via VLM — error text was "Extraction failed: Configuration file not found or invalid. Please create .z-ai-config in your project, home directory, or /etc".
+- Inspected z-ai-web-dev-sdk source (node_modules/z-ai-web-dev-sdk/dist/index.js lines 5-28): loadConfig() checks 3 paths in order: ./.z-ai-config (cwd), ~/.z-ai-config (homedir), /etc/.z-ai-config. Throws after all 3 fail.
+- Verified /etc/.z-ai-config exists on sandbox (-r--r--r-- root:root, world-readable, valid JSON with baseUrl + apiKey). Plain Node script reads it fine from project root.
+- Verified dev.log: user's failed request did NOT appear anywhere (no POST /api/admin/sds/extract around screenshot timestamp 09:41 UTC). Only my own test requests appear. This proves the user's request never reached the sandbox server — they were testing on their LOCAL machine.
+- Root cause: z-ai-web-dev-sdk uses baseUrl https://internal-api.z.ai/v1 which is an INTERNAL endpoint only reachable from inside the Z.ai cloud sandbox. On a local machine: no .z-ai-config file exists AND the internal API endpoint is not publicly accessible. The AI auto-fill feature is sandbox-only by design.
+- Verified sandbox works: logged in as admin, POSTed real SDS PDF (storage/sds/03890cdd-...pdf) to /api/admin/sds/extract → HTTP 200 in 9.7s, full Sodium Hydroxide extraction (chemicalName, casNumber, formula, manufacturer, signalWord, pictograms, hazardClasses, PPE, firstAid, firefighting, accidentalRelease all populated correctly).
+- Fix: Improved error handling in src/app/api/admin/sds/extract/route.ts. Wrapped ZAI.create() in its own try/catch that detects the "Configuration file not found" error and returns a clear 503 response: "AI auto-fill is only available in the Z.ai cloud sandbox (the Preview Panel). The vision model service is not reachable from a local development machine. Please test this feature via the Preview Panel." This replaces the previous confusing raw SDK error message.
+- Lint: clean (0 errors, 0 warnings).
+
+Stage Summary:
+- The AI auto-fill feature is a SANDBOX-ONLY feature by design — it relies on the in-house z-ai-web-dev-sdk VLM service (internal-api.z.ai) which is only reachable from inside the Z.ai cloud.
+- On the sandbox (Preview Panel): fully working, verified end-to-end (200 OK in ~10-18s with complete field extraction).
+- On a local machine: cannot work (no .z-ai-config + internal API unreachable). The error message is now self-documenting and tells the user to test via the Preview Panel.
+- All other features (chemical CRUD, SDS upload/view, sync, search, emergency mode) work on both local and sandbox — only AI auto-fill is sandbox-only.
+- File modified: src/app/api/admin/sds/extract/route.ts (added ZAI.create() try/catch with config-error detection + clear 503 message).

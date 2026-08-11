@@ -289,9 +289,32 @@ export async function POST(request: Request) {
   // ---------------------------------------------------------------------------
   // Build the VLM message and call createVision.
   // ---------------------------------------------------------------------------
+  let zai;
   try {
-    const zai = await ZAI.create();
+    zai = await ZAI.create();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // The SDK throws this exact message when no .z-ai-config file is found in
+    // any of the 3 search paths (project root, home dir, /etc). This happens
+    // when the app is run outside the Z.ai cloud sandbox — the in-house VLM
+    // service is only reachable from inside the sandbox.
+    if (msg.includes("Configuration file not found")) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "AI auto-fill is only available in the Z.ai cloud sandbox (the Preview Panel). The vision model service is not reachable from a local development machine. Please test this feature via the Preview Panel.",
+        },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json(
+      { success: false, error: `AI service unavailable: ${msg}` },
+      { status: 502 }
+    );
+  }
 
+  try {
     const content: Array<
       | { type: "text"; text: string }
       | { type: "image_url"; image_url: { url: string } }
