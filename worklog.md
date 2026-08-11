@@ -318,3 +318,27 @@ Stage Summary:
 - Three fixes shipped: cross-platform dev/start scripts, relative DATABASE_URL in .env.example, comprehensive Quick Start docs.
 - The app runs identically whether invoked via `bun run dev` (recommended) or `npx next dev` — the only Bun-hard requirement is `bun run db:seed`.
 - DEVELOPER_GUIDE.md now leads with a clone-to-running guide that a brand-new developer can follow without hitting the `npm` pitfalls.
+
+---
+Task ID: GITIGNORE-FIX
+Agent: Orchestrator
+Task: Fix "Module not found: @/lib/local-db" build error on cloned project
+
+Work Log:
+- User reported a build error after cloning: "Module not found: Can't resolve '@/lib/local-db'" in src/components/catalog/chemical-catalog.tsx line 21.
+- Diagnosed via VLM screenshot analysis of the Next.js error overlay.
+- Root cause: `.gitignore` line 43 had a wildcard pattern `local-*` that matched `src/lib/local-db.ts`, so git never committed the file. When the user cloned, the file was missing.
+- Also discovered `.env*` pattern (line 34) was hiding `.env.example` — the config template users need to copy from. Also not committed.
+- Confirmed both files existed in the working tree but were NOT tracked by git (`git ls-files --error-unmatch` failed for both).
+- Scanned entire src/, public/, scripts/ trees for any other source files hidden by gitignore patterns — none found. Only these two were affected.
+- Fixed `.gitignore`:
+  * Removed the `local-*` wildcard pattern entirely (was a leftover, not needed for anything legitimate).
+  * Added `!.env.example` negation after `.env*` so the template is always tracked while real `.env` stays ignored.
+- Force-added both previously-ignored files (`git add -f` required because git refuses normal `add` on ignored paths).
+- Committed: "fix: commit src/lib/local-db.ts and .env.example (were wrongly gitignored)" — 3 files changed, 331 insertions.
+- Verified: both files now tracked, dev server still returns HTTP 200, app healthy.
+
+Stage Summary:
+- Build error on fresh clones is resolved. Users pulling the latest commit will now receive `src/lib/local-db.ts` and `.env.example`.
+- Existing users who already cloned need to: `git pull`, then `bun install` (if not done), then follow the Quick Start in DEVELOPER_GUIDE.md Section 0.
+- No application code changed — only .gitignore and the two previously-missing files are now committed.
