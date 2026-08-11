@@ -344,7 +344,7 @@ preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
 | GET | `/api/sync?since=<epoch-ms>` | Delta sync. Returns `{ chemicals: [...], sdsDocuments: [...], deletedChemicalIds: [...], serverTime }`. Only records with `updatedAt > since` (or `deletedAt > since`) are returned. |
 | GET | `/api/chemicals` | List all non-deleted chemicals (metadata only, no PDF). |
 | GET | `/api/chemicals/[id]` | Single chemical. |
-| GET | `/api/sds/[id]/download` | Stream the SDS PDF for chemical `[id]`. Sets `Content-Type: application/pdf`. Used by both the public PWA (caches Blob) and admin "View". |
+| GET | `/api/sds/[id]/download` | Stream the SDS PDF for chemical `[id]`. Sets `Content-Type: application/pdf`, `Cache-Control: no-store, must-revalidate`, and a strong `ETag` derived from `contentHash`. Supports `If-None-Match` → `304`. The client may append `?v=<version>` as a cache-buster (ignored by the handler). Used by both the public PWA (caches Blob in IndexedDB) and admin "View". |
 
 ### Admin (auth required — `requireAdmin()`)
 | Method | Path | Purpose |
@@ -447,8 +447,16 @@ Return { success: true, data: { ...15 fields } }
    - Upsert metadata into Dexie.sdsDocuments.
    - Compare version with Dexie.sdsBlobs.
      - If version unchanged AND blob exists → skip (no re-download).
-     - If version changed OR blob missing → GET /api/sds/[id]/download,
-       store Blob in Dexie.sdsBlobs with new version.
+     - If version changed OR blob missing → GET /api/sds/[id]/download?v=<version>
+       (cache-buster guarantees the browser HTTP cache won't shadow a freshly
+       uploaded PDF), store Blob in Dexie.sdsBlobs with new version.
+
+> **Note on `getSdsBlobForChemical()` (the public "View SDS PDF" path):** this
+> function deliberately **bypasses the local version check when online** and
+> always fetches fresh bytes from the server with `{ cache: "no-store" }`.
+> This is safety-critical: a user who loaded the page before the admin
+> uploaded the real PDF would otherwise see a stale placeholder until the next
+> periodic sync. The IndexedDB cache is only used as an offline fallback.
 6. Persist new lastSyncTimestamp = response.serverTime.
 7. Release mutex. Update Zustand sync status.
 ```
@@ -523,7 +531,9 @@ The sandbox gateway (`Caddyfile`) uses an `XTransformPort` query param for port 
   - Precaches app shell (`/`, manifest, icons).
   - Navigations: network-first with cache + app-shell fallback.
   - Static assets: stale-while-revalidate.
-  - SDS PDF responses: cached for offline reuse.
+  - SDS PDF responses: **not** cached by the service worker or HTTP cache
+    (`Cache-Control: no-store` on the server). Offline reuse is handled by
+    the IndexedDB `sdsBlobs` store, keyed by SDS version — see [§ 7 Sync Engine](#7-sync-engine).
 - **Registration** (`src/components/common/service-worker-register.tsx`): production-only to avoid dev caching churn.
 - **Installability:** after a production build, the app is installable on Android/Chrome/iOS.
 
@@ -655,6 +665,7 @@ Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hoo
 | SDS upload 413 | File too large | Check the size limit in `src/lib/validation.ts` / reverse proxy |
 | Dexie schema version conflict | Old client DB version | Bump Dexie schema version in `src/lib/local-db.ts` with an upgrade function |
 | Service worker not updating | Old SW cached | Bump `CACHE_VERSION` in `public/sw.js`; user will get new SW on next load |
+| Public user sees stale placeholder PDF after admin uploads the real one | Browser HTTP cache or stale IndexedDB blob | Fixed in code: download route sends `no-store`, `getSdsBlobForChemical()` always fetches fresh when online. If it recurs, hard-refresh the page and check the SDS `version` in Dexie |
 | Preview shows blank "Z" screen | Dev server not running | `bun run dev` (this is the most common "it's loading" report) |
 
 ---
@@ -667,7 +678,7 @@ The implementation is **complete and verified**:
 - Admin login + dashboard (Overview / Chemicals / SDS) functional.
 - Delta sync API returns correct deltas; client sync engine runs on startup / online / periodic.
 - SDS PDF upload validates files (magic bytes + MIME + extension + size).
-- SDS PDFs cached client-side in IndexedDB for offline viewing.
+- SDS PDFs cached client-side in IndexedDB for offline viewing. When online, the public "View SDS PDF" button always fetches the latest bytes from the server (`no-store`) and refreshes the cache — a replaced PDF is visible instantly, with no 1-hour HTTP-cache delay.
 - Security headers configured; `.env` gitignored; admin auth server-side enforced.
 - TypeScript strict: 0 errors. ESLint: 0 errors.
 

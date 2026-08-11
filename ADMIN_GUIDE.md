@@ -164,7 +164,7 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 - **Always upload the manufacturer's official SDS PDF** — not a scanned image, not a Word doc converted on the fly.
 - **File must be a real PDF.** The upload rejects anything that isn't a valid PDF (validated by magic bytes, not just the file extension). Renaming a `.docx` to `.pdf` will be rejected.
 - **Keep file sizes reasonable** (a few MB is fine). Very large PDFs slow down the first sync for field devices on mobile data.
-- **When you replace a PDF**, the version number increments. Devices that already had the old version will automatically fetch the new one on their next sync.
+- **When you replace a PDF**, the version number increments and the new file is visible **immediately** — there is no cache delay. The server marks the download `Cache-Control: no-store`, and the public app always fetches fresh bytes when online (the IndexedDB cache is only used offline).
 - **Use "Revert to placeholder"** only to undo a mistaken upload. The placeholder is a minimal valid PDF that says "SDS not yet uploaded" — it should not stay in place for real chemicals.
 
 ---
@@ -179,6 +179,7 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 | SDS upload rejected with "Invalid file" | File is not a real PDF, or wrong extension | Re-export as PDF from the original source |
 | Field device not seeing your changes | Device is offline, or sync error | Have the user open the app while online; tap the sync status indicator to retry |
 | Public catalog shows stale data after admin edit | Sync hasn't fired yet | Sync runs on startup / online transition / periodically. A page refresh while online forces a re-check. |
+| Field user still sees the old placeholder PDF after you uploaded the real one | IndexedDB cache lag (fixed) | The public "View SDS PDF" button now always fetches fresh from the server when online. Ask the user to hard-refresh once. Confirm the SDS `version` incremented in the admin SDS tab. |
 | Dashboard shows 0 chemicals | Database not seeded | `bun run db:push && bun run db:seed`, then restart |
 
 ---
