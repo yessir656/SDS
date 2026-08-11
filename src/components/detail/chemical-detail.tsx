@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/accordion";
 import { GhsPictogramBadge } from "@/components/ghs/pictograms";
 import { useAppStore } from "@/store/app-store";
-import { GHS_PICTOGRAM_INFO, HAZARD_CLASS_LABELS } from "@/types";
+import { HAZARD_CLASS_LABELS } from "@/types";
 import { cn } from "@/lib/utils";
 
 export function ChemicalDetail() {

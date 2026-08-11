@@ -4,12 +4,11 @@
 // ChemicalCatalog — main catalog view with stats, search, filters, grid
 // ============================================================================
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   SlidersHorizontal,
   Inbox,
-  Search as SearchIcon,
   AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";

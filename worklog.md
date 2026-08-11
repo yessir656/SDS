@@ -186,3 +186,50 @@ Stage Summary:
   ✅ Mobile-friendly responsive layout
   ✅ No placeholder TODOs or dead code
 - Project complete and verified
+
+---
+Task ID: AUDIT
+Agent: Orchestrator
+Task: Comprehensive non-negotiable system audit
+
+Work Log:
+- Full file inventory: verified all 27 custom files + 55 shadcn/ui components exist
+- TypeScript strict check: 0 errors in src/ (only pre-existing errors in examples/skills)
+- ESLint check: 0 errors, 0 warnings
+- Import resolution audit: verified every import resolves to an actual export
+- Found and fixed 7 code quality issues:
+  1. Removed unused `useMemo` import in chemical-catalog.tsx
+  2. Removed unused `SearchIcon` import in chemical-catalog.tsx
+  3. Removed unused `GHS_PICTOGRAM_INFO` import in chemical-detail.tsx
+  4. Removed dead `Badge` import + re-export in filter-panel.tsx
+  5. Removed unused `CatalogStats` type import in dashboard-stats.tsx
+  6. Removed dead `GHS_PICTOGRAM_INFO` import + re-export in local-db.ts
+  7. Fixed UX gap: added "Clear all" button to expanded FilterControls (was only in collapsed FilterPanel)
+- Seed data integrity audit: 14 chemicals, 7 locations, 0 missing fields, 0 empty arrays, no duplicate IDs/CAS, all measures detailed (100+ chars)
+- PWA audit: manifest valid JSON, SW valid JS, all 5 icon files exist with correct sizes
+- Browser verification (Agent Browser) - tested ALL features:
+  ✅ Catalog loads with 14 chemicals + dashboard stats (14/13/1/4)
+  ✅ Search with type-ahead (tested "meth" → 3 results incl. trade name "Methylbenzene")
+  ✅ Filters: department (Corrosion Testing → 2 results), signal word, hazard class, combined filters
+  ✅ Clear all button (both collapsed and expanded filter states)
+  ✅ Empty search state ("No chemicals found")
+  ✅ Chemical detail: all identifiers, GHS pictograms, hazard chips, SDS accordion (expanded First-Aid → full content)
+  ✅ Emergency mode: all 6 sections (GHS summary, First-Aid, Firefighting, Spill, PPE, Emergency Contact)
+  ✅ ESC key exits emergency → returns to detail
+  ✅ Emergency FAB from catalog → quick-select dialog with search → navigates to emergency
+  ✅ Emergency FAB from detail → direct to emergency
+  ✅ FAB correctly hidden in emergency view
+  ✅ Back to detail button from emergency
+  ✅ Home button returns to catalog from detail
+  ✅ Theme toggle (light/dark/system) — dark class verified on <html>
+  ✅ Offline indicator (Online ↔ Offline toggle verified)
+  ✅ Search works while offline (IndexedDB local data)
+  ✅ Mobile responsive (390x844 viewport: catalog, detail, emergency all work)
+  ✅ No console errors during any interaction
+  ✅ No compilation errors in dev.log
+
+Stage Summary:
+- All 9 acceptance criteria verified and passing
+- 7 code quality issues fixed (unused imports + UX gap)
+- Every page, every component, every feature functional and ready to use
+- Zero errors, zero warnings, zero dead code

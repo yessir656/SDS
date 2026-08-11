@@ -6,7 +6,6 @@
 
 import { Filter, X, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/store/app-store";
 import {
@@ -110,9 +109,33 @@ export function FilterControls() {
   const toggleDepartment = useAppStore((s) => s.toggleDepartment);
   const toggleSignalWord = useAppStore((s) => s.toggleSignalWord);
   const toggleHazardClass = useAppStore((s) => s.toggleHazardClass);
+  const clearFilters = useAppStore((s) => s.clearFilters);
+
+  const activeCount =
+    query.departments.length +
+    query.signalWords.length +
+    query.hazardClasses.length;
 
   return (
     <div className="space-y-3">
+      {/* Header with clear-all when filters are active */}
+      {activeCount > 0 && (
+        <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            {activeCount} active {activeCount === 1 ? "filter" : "filters"}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearFilters}
+            className="h-7 gap-1 px-2 text-xs"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Clear all
+          </Button>
+        </div>
+      )}
+
       {/* Departments */}
       <div>
         <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -207,6 +230,3 @@ function FilterChip({
     </button>
   );
 }
-
-// Re-export Badge for convenience in other components
-export { Badge };

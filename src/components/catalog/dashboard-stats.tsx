@@ -10,7 +10,6 @@ import { db, getCatalogStats } from "@/lib/local-db";
 import { Card, CardContent } from "@/components/ui/card";
 import { GhsPictogram } from "@/components/ghs/pictograms";
 import { cn } from "@/lib/utils";
-import type { CatalogStats } from "@/types";
 
 export function DashboardStats() {
   // useLiveQuery keeps the stats reactive to DB changes.
