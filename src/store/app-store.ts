@@ -2,11 +2,11 @@
 
 // ============================================================================
 // SDS-CHEM — Global App State (Zustand)
-// Manages single-route SPA view switching and the currently selected chemical.
+// Manages single-route SPA view switching, catalog query, and sync status.
 // ============================================================================
 
 import { create } from "zustand";
-import type { AppView, CatalogQuery, ChemicalRecord } from "@/types";
+import type { AppView, CatalogQuery, ChemicalRecord, SyncStatus } from "@/types";
 
 interface AppState {
   // --- View routing (single-page, no URL changes) ---
@@ -16,17 +16,27 @@ interface AppState {
   // --- Catalog query state (search + filters) ---
   query: CatalogQuery;
 
-  // --- Actions ---
+  // --- Sync status ---
+  syncStatus: SyncStatus;
+  lastSyncAt: number | null;
+  syncError: string | null;
+
+  // --- Actions: view routing ---
   goCatalog: () => void;
   goToDetail: (chemical: ChemicalRecord) => void;
   goToEmergency: (chemical: ChemicalRecord) => void;
   clearSelection: () => void;
 
+  // --- Actions: search & filters ---
   setSearch: (search: string) => void;
   toggleDepartment: (dept: CatalogQuery["departments"][number]) => void;
   toggleSignalWord: (sw: CatalogQuery["signalWords"][number]) => void;
   toggleHazardClass: (hc: CatalogQuery["hazardClasses"][number]) => void;
   clearFilters: () => void;
+
+  // --- Actions: sync ---
+  setSyncStatus: (status: SyncStatus, error?: string | null) => void;
+  setLastSyncAt: (timestamp: number) => void;
 }
 
 const DEFAULT_QUERY: CatalogQuery = {
@@ -40,6 +50,9 @@ export const useAppStore = create<AppState>((set) => ({
   currentView: "catalog",
   selectedChemical: null,
   query: DEFAULT_QUERY,
+  syncStatus: "offline",
+  lastSyncAt: null,
+  syncError: null,
 
   goCatalog: () => set({ currentView: "catalog", selectedChemical: null }),
 
@@ -93,4 +106,9 @@ export const useAppStore = create<AppState>((set) => ({
     }),
 
   clearFilters: () => set({ query: DEFAULT_QUERY }),
+
+  setSyncStatus: (status, error = null) =>
+    set({ syncStatus: status, syncError: error }),
+
+  setLastSyncAt: (timestamp) => set({ lastSyncAt: timestamp }),
 }));

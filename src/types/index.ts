@@ -149,6 +149,11 @@ export interface ChemicalRecord {
 
   /** All 16 SDS sections (optional — for full detail view). */
   sdsSections?: SdsSection[];
+
+  /** Server-managed sync field — incremented on every backend update. */
+  serverVersion?: number;
+  /** Soft-delete timestamp (epoch-ms). Set by the server; null when active. */
+  deletedAt?: number | null;
 }
 
 /** User preferences stored locally (no auth, single-device). */
@@ -181,6 +186,44 @@ export interface CatalogQuery {
 
 /** Application view state (single-route SPA). */
 export type AppView = "catalog" | "detail" | "emergency";
+
+// ---------------------------------------------------------------------------
+// SDS Document (client-side mirror of server SDS metadata — no blob here)
+// ---------------------------------------------------------------------------
+
+/** SDS document metadata stored locally. The actual PDF blob is cached separately. */
+export interface SdsDocumentRecord {
+  id: string;
+  chemicalId: string;
+  originalFileName: string;
+  fileSize: number;
+  mimeType: string;
+  contentHash: string;
+  status: "placeholder" | "available";
+  version: number;
+  uploadedById: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Cached SDS PDF blob in IndexedDB — stored separately from metadata. */
+export interface SdsBlobCache {
+  sdsId: string;
+  blob: Blob;
+  version: number;
+  cachedAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// Sync metadata
+// ---------------------------------------------------------------------------
+
+/** Tracks the last successful sync with the backend. */
+export interface SyncMeta {
+  id: string; // always "default"
+  lastSyncTimestamp: number; // server epoch-ms from the last successful sync
+  lastSyncAt: number; // local epoch-ms when the last sync completed
+}
 
 // ----------------------------------------------------------------------------
 // Constant lookup tables

@@ -233,3 +233,29 @@ Stage Summary:
 - 7 code quality issues fixed (unused imports + UX gap)
 - Every page, every component, every feature functional and ready to use
 - Zero errors, zero warnings, zero dead code
+
+---
+Task ID: ADMIN-SYNC
+Agent: Orchestrator
+Task: Full implementation of Admin + SDS Management + Online Sync
+
+Work Log:
+- Phase 1 (Backend): Updated Prisma schema with User, Chemical (soft-delete, serverVersion), SdsDocument models. Installed bcryptjs. Created auth.ts (NextAuth + Credentials + bcrypt), session.ts (requireAdmin), storage.ts (safe file storage), validation.ts (zod schemas), pdf-placeholder.ts (minimal PDF generator). Created server seed script that creates admin from env vars + migrates 14 chemicals with placeholder SDS PDFs.
+- Phase 2 (API): Created 9 API routes: NextAuth handler, public /api/sync (delta sync), /api/chemicals, /api/sds/[id]/download, admin CRUD for chemicals, admin SDS upload (multipart with magic-byte/MIME/extension/size validation), admin SDS revert, admin dashboard stats.
+- Phase 3 (Client Sync): Upgraded Dexie schema to v2 with sdsDocuments, sdsBlobs, syncMeta tables. Created sync-engine.ts (delta sync, SDS blob download, mutex, rate limiting, periodic sync). Created useSync hook (triggers on startup + online transition + periodic). Created SyncStatusIndicator component. Updated Zustand store with sync status.
+- Phase 4 (Admin Frontend): Created middleware.ts (edge-level admin route protection). Created /admin/login page. Created /admin dashboard with tabs (Overview, Chemicals, SDS). Created admin-overview, chemical-manager (full CRUD with dialog forms), sds-manager (upload/replace/view/revert).
+- Phase 5 (Security): Added security headers to next.config.ts (CSP, X-Frame-Options, HSTS, etc.). Enabled reactStrictMode. Untracked .env from git. Created .env.example. Updated .gitignore for storage/ and db/. Updated Prisma log config to not log queries in production.
+- Phase 6 (Public UI): Added SyncStatusIndicator to header. Added "View SDS PDF" button to chemical detail view with offline blob caching.
+- Phase 7 (Testing): Verified all routes work. Admin login/logout works. SDS upload works (placeholder→available, version incremented). Sync API returns correct deltas. Unauthenticated admin API returns 401. File upload validation rejects non-PDF and wrong extensions. Security headers present. TypeScript clean. ESLint clean. Browser-verified public PWA + admin dashboard.
+
+Stage Summary:
+- Full admin + sync system implemented and tested end-to-end
+- 14 chemicals migrated to Prisma DB, each with placeholder SDS PDFs
+- Admin can log in, manage chemicals (CRUD), upload/replace SDS PDFs
+- Public PWA auto-syncs on startup and on online transition
+- SDS PDFs cached locally in IndexedDB for offline viewing
+- All admin APIs server-side authorized (401 without session)
+- File uploads validated (magic bytes + MIME + extension + size)
+- Security headers configured (CSP, HSTS, X-Frame-Options, etc.)
+- .env untracked from git
+- TypeScript: 0 errors. ESLint: 0 errors.

@@ -17,6 +17,10 @@ import {
   FileText,
   Clock,
   Phone,
+  FileCheck,
+  FileWarning,
+  ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,11 +36,42 @@ import { GhsPictogramBadge } from "@/components/ghs/pictograms";
 import { useAppStore } from "@/store/app-store";
 import { HAZARD_CLASS_LABELS } from "@/types";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/local-db";
+import { getSdsBlobForChemical } from "@/lib/sync-engine";
 
 export function ChemicalDetail() {
   const chemical = useAppStore((s) => s.selectedChemical);
   const goCatalog = useAppStore((s) => s.goCatalog);
   const goToEmergency = useAppStore((s) => s.goToEmergency);
+
+  // Reactively query the local SDS metadata for this chemical.
+  const sdsDoc = useLiveQuery(
+    async () =>
+      chemical ? db.sdsDocuments.where("chemicalId").equals(chemical.id).first() : undefined,
+    [chemical?.id],
+    undefined
+  );
+  const [sdsLoading, setSdsLoading] = useState(false);
+
+  const handleViewSds = async () => {
+    if (!chemical) return;
+    setSdsLoading(true);
+    try {
+      const blob = await getSdsBlobForChemical(chemical.id);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+        // Revoke after 60s to allow the browser to load it.
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } else {
+        alert("SDS document is not available offline. Connect to the internet and try again.");
+      }
+    } finally {
+      setSdsLoading(false);
+    }
+  };
 
   if (!chemical) {
     // Safety fallback — should never happen, but if it does, return to catalog.
@@ -322,6 +357,60 @@ export function ChemicalDetail() {
                   </li>
                 ))}
               </ul>
+            </CardContent>
+          </Card>
+
+          {/* SDS document viewer */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileText className="h-4 w-4 text-teal-600" />
+                SDS Document
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {sdsDoc ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    {sdsDoc.status === "available" ? (
+                      <Badge className="gap-1 border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        <FileCheck className="h-3 w-3" />
+                        Available
+                      </Badge>
+                    ) : (
+                      <Badge className="gap-1 border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                        <FileWarning className="h-3 w-3" />
+                        Placeholder
+                      </Badge>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      v{sdsDoc.version}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {sdsDoc.status === "available"
+                      ? "The full Safety Data Sheet is cached for offline viewing."
+                      : "A placeholder SDS is available. The administrator has not yet uploaded the actual document."}
+                  </p>
+                  <Button
+                    onClick={handleViewSds}
+                    disabled={sdsLoading}
+                    variant="outline"
+                    className="w-full gap-2"
+                  >
+                    {sdsLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-4 w-4" />
+                    )}
+                    View SDS PDF
+                  </Button>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  SDS document metadata is syncing. Please try again in a moment.
+                </p>
+              )}
             </CardContent>
           </Card>
 

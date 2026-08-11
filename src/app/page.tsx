@@ -14,11 +14,15 @@ import { ChemicalDetail } from "@/components/detail/chemical-detail";
 import { EmergencyView } from "@/components/emergency/emergency-view";
 import { EmergencyFab } from "@/components/emergency/emergency-fab";
 import { useDatabaseReady } from "@/hooks/use-database-ready";
+import { useSync } from "@/hooks/use-sync";
 import { useAppStore } from "@/store/app-store";
 
 export default function Home() {
   const dbState = useDatabaseReady();
   const currentView = useAppStore((s) => s.currentView);
+
+  // Mount the sync lifecycle (startup, online transition, periodic).
+  useSync();
 
   // --- Loading state ---
   if (dbState.status === "loading") {

@@ -6,6 +6,7 @@
 
 import { FlaskConical, ShieldAlert } from "lucide-react";
 import { OfflineIndicator } from "@/components/common/offline-indicator";
+import { SyncStatusIndicator } from "@/components/common/sync-status-indicator";
 import { ThemeToggle } from "@/components/common/theme-toggle";
 import { useAppStore } from "@/store/app-store";
 
@@ -39,6 +40,7 @@ export function AppHeader() {
         </button>
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          <SyncStatusIndicator />
           <OfflineIndicator compact />
 
           {currentView === "detail" && (
