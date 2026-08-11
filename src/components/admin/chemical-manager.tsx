@@ -4,7 +4,7 @@
 // ChemicalManager — admin CRUD table for chemicals
 // ============================================================================
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   Plus,
   Search,
@@ -13,6 +13,9 @@ import {
   RefreshCw,
   Loader2,
   X,
+  FileText,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -324,7 +327,104 @@ function ChemicalFormDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // AI auto-fill state.
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractedFromPdf, setExtractedFromPdf] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const isEdit = !!chemical;
+
+  // ---------------------------------------------------------------------------
+  // AI auto-fill handler.
+  // Sends the selected PDF to /api/admin/sds/extract, then merges the returned
+  // fields into the form state. The `id` field is preserved (admin must enter
+  // it manually in create mode).
+  // ---------------------------------------------------------------------------
+  const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input value so the same file can be re-selected later.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!file) return;
+
+    setExtracting(true);
+    setExtractError(null);
+
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+
+      const res = await fetch("/api/admin/sds/extract", {
+        method: "POST",
+        body: fd,
+      });
+
+      const json = await res.json().catch(() => ({ success: false, error: "Invalid response from server" }));
+
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || `Extraction failed (HTTP ${res.status})`);
+      }
+
+      const d = json.data as {
+        chemicalName?: string;
+        casNumber?: string;
+        formula?: string;
+        tradeName?: string;
+        manufacturer?: string;
+        supplier?: string;
+        signalWord?: SignalWord;
+        ghsPictograms?: GhsPictogram[];
+        hazardClasses?: HazardClass[];
+        storageLocation?: string;
+        safetyInstructions?: string;
+        emergencyContact?: string;
+        personalProtectiveEquipment?: string[];
+        firstAidMeasures?: string;
+        firefightingMeasures?: string;
+        accidentalReleaseMeasures?: string;
+      };
+
+      setForm((prev) => ({
+        ...prev,
+        // Preserve `id` — admin must always enter it manually in create mode.
+        id: prev.id,
+        chemicalName: d.chemicalName || prev.chemicalName,
+        casNumber: d.casNumber || prev.casNumber,
+        formula: d.formula || prev.formula,
+        tradeName: d.tradeName || prev.tradeName,
+        manufacturer: d.manufacturer || prev.manufacturer,
+        supplier: d.supplier || prev.supplier,
+        signalWord: d.signalWord || prev.signalWord,
+        ghsPictograms:
+          Array.isArray(d.ghsPictograms) && d.ghsPictograms.length > 0
+            ? d.ghsPictograms
+            : prev.ghsPictograms,
+        hazardClasses:
+          Array.isArray(d.hazardClasses) && d.hazardClasses.length > 0
+            ? d.hazardClasses
+            : prev.hazardClasses,
+        storageLocation: d.storageLocation || prev.storageLocation,
+        safetyInstructions: d.safetyInstructions || prev.safetyInstructions,
+        emergencyContact: d.emergencyContact || prev.emergencyContact,
+        // PPE comes back as an array; join with newlines for the textarea.
+        personalProtectiveEquipment:
+          Array.isArray(d.personalProtectiveEquipment) && d.personalProtectiveEquipment.length > 0
+            ? d.personalProtectiveEquipment.join("\n")
+            : prev.personalProtectiveEquipment,
+        firstAidMeasures: d.firstAidMeasures || prev.firstAidMeasures,
+        firefightingMeasures: d.firefightingMeasures || prev.firefightingMeasures,
+        accidentalReleaseMeasures:
+          d.accidentalReleaseMeasures || prev.accidentalReleaseMeasures,
+      }));
+
+      setExtractedFromPdf(true);
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Auto-fill failed");
+      setExtractedFromPdf(false);
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -378,7 +478,86 @@ function ChemicalFormDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* Hidden file input — triggered by the Auto-fill button. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,application/pdf"
+          hidden
+          onChange={handleAutoFill}
+        />
+
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Auto-fill from PDF banner / button */}
+          <div className="space-y-2 rounded-lg border border-teal-200 bg-teal-50/60 p-3 dark:border-teal-900 dark:bg-teal-950/40">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2 border-teal-400 text-teal-700 hover:bg-teal-100 dark:border-teal-800 dark:text-teal-300 dark:hover:bg-teal-900/40"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={extracting || saving}
+              >
+                {extracting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileText className="h-4 w-4" />
+                )}
+                {extracting ? "Reading SDS document…" : "Auto-fill from PDF"}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Upload a scanned or digital SDS PDF — AI will read it and pre-fill the fields below.
+              </span>
+            </div>
+
+            {/* Loading state */}
+            {extracting && (
+              <div className="flex items-center gap-2 text-xs text-teal-700 dark:text-teal-300">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Converting PDF to images, then reading with AI… This takes ~10-15 seconds for multi-page documents.
+              </div>
+            )}
+
+            {/* Error banner */}
+            {extractError && !extracting && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-semibold">Auto-fill failed</div>
+                  <div className="mt-0.5">{extractError}</div>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900"
+                  onClick={() => setExtractError(null)}
+                  aria-label="Dismiss error"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Review banner */}
+            {extractedFromPdf && !extracting && (
+              <div className="flex items-start gap-2 rounded-md border border-teal-300 bg-teal-100/70 px-3 py-2 text-xs text-teal-800 dark:border-teal-700 dark:bg-teal-900/50 dark:text-teal-200">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-semibold">Auto-filled from PDF</div>
+                  <div className="mt-0.5">Please review all fields carefully before saving — AI extraction may have errors or omissions.</div>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded p-0.5 hover:bg-teal-200 dark:hover:bg-teal-800"
+                  onClick={() => setExtractedFromPdf(false)}
+                  aria-label="Dismiss review banner"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* ID — only for create */}
           {!isEdit && (
             <div className="space-y-2">

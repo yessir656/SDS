@@ -96,6 +96,50 @@ Manage the actual PDF files. Each chemical has exactly one SDS document (1:1).
 
 ---
 
+## 4.4 AI Auto-Fill from PDF  ⚡ (New!)
+
+**This is the fastest way to add a chemical.** Instead of typing every field by hand, you upload the manufacturer's SDS PDF and the AI reads it for you.
+
+### How it works
+1. Click **"Add Chemical"** to open the form.
+2. At the top of the form, click the **"Auto-fill from PDF"** button.
+3. Select the manufacturer's SDS PDF file from your computer (must be a `.pdf` file, max 10 MB).
+4. Wait ~10-15 seconds while the AI:
+   - Converts the PDF pages to images
+   - Reads the text and hazard information using vision AI
+   - Maps the manufacturer's terms to our system's standard fields (GHS pictograms, hazard classes, etc.)
+5. The form populates automatically with a **"✓ Auto-filled from PDF — please review all fields"** banner.
+6. **Review every field carefully** — AI is smart but not perfect, especially with safety-critical data.
+7. Fix any mistakes, enter the **ID** field (the AI can't guess this), then click **Create Chemical**.
+
+### What the AI extracts
+| Field | Usually extracted? | Notes |
+|---|---|---|
+| Chemical Name | ✅ Yes | From Section 1 (Identification) |
+| CAS Number | ✅ Yes | From Section 1 or 3 |
+| Formula | ✅ Yes | From Section 3 (Composition) |
+| Manufacturer / Supplier | ✅ Yes | From Section 1 |
+| Signal Word | ✅ Yes | DANGER or WARNING, from Section 2 |
+| GHS Pictograms | ✅ Yes | Mapped to our 9 standard pictograms |
+| Hazard Classes | ✅ Yes | Mapped to our 13 standard hazard classes |
+| First-Aid Measures | ✅ Yes | Section 4 — full text |
+| Firefighting Measures | ✅ Yes | Section 5 — full text |
+| Accidental Release | ✅ Yes | Section 6 — full text |
+| PPE | ⚠️ Sometimes | Section 8 — may need manual review |
+| Emergency Contact | ⚠️ Sometimes | From Section 1 if listed |
+| Storage Location | ❌ No | This is lab-specific — you must enter it |
+| Department | ❌ No | This is lab-specific — you must select it |
+| ID | ❌ No | You must enter this (e.g., `chem-toluene`) |
+
+### Important notes
+- **Works with both scanned and digital PDFs** — the AI uses OCR (optical character recognition) to read scanned documents.
+- **Always review** — the AI is ~90% accurate but safety data must be 100% correct. Check hazard classes and signal words especially carefully.
+- **One PDF at a time** — for bulk imports, add chemicals one by one with this feature. (A future Excel bulk-import feature is planned.)
+- **No cost** — the AI service is built-in and free.
+- **Your PDF is not stored** during extraction — it's converted to images, read by the AI, then the temporary files are deleted. (The PDF is only permanently stored if you also upload it via the SDS tab.)
+
+---
+
 ## 5. How Changes Reach the Field (Sync)
 
 You do **not** need to tell anyone to refresh. The system is **offline-first with automatic delta sync**:

@@ -355,7 +355,70 @@ preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
 | PUT | `/api/admin/chemicals/[id]` | Update. Bumps `serverVersion`. Sets `updatedById`. |
 | DELETE | `/api/admin/chemicals/[id]` | Soft-delete (`deletedAt = now`). Cascade-soft-deletes the SDS. |
 | POST | `/api/admin/sds` | Upload / replace SDS PDF. Multipart form. Validates magic bytes + MIME + extension + size. Stores with UUID filename. Increments `version`, sets `status = available`. |
+| POST | `/api/admin/sds/extract` | **AI extraction.** Upload a PDF → returns structured chemical fields extracted by VLM. Does NOT store the PDF. See [§ 6.1 AI SDS Extraction Pipeline](#61-ai-sds-extraction-pipeline) below. |
 | DELETE | `/api/admin/sds/[id]` | Revert to placeholder. Removes the uploaded file, resets `status = placeholder`, increments `version`. |
+
+### 6.1 AI SDS Extraction Pipeline
+
+`POST /api/admin/sds/extract` — AI-powered auto-fill for the chemical form.
+
+**Flow:**
+```
+Admin uploads PDF
+       ↓
+[1] Validate: magic bytes (%PDF-), MIME (application/pdf), extension (.pdf), size (≤10MB)
+       ↓
+[2] Save PDF to os.tmpdir()/sds-extract-{uuid}.pdf
+       ↓
+[3] pdftoppm -png -r 150 -l 5  (converts first 5 pages to PNG images)
+       ↓
+[4] Read each PNG as base64
+       ↓
+[5] zai.chat.completions.createVision()  (send all page images in one call)
+     Prompt asks for JSON with 15 fields + provides valid enum values
+     for signalWord, ghsPictograms, hazardClasses so VLM maps correctly
+       ↓
+[6] Parse VLM response: strip markdown fences, JSON.parse, fallback extraction
+       ↓
+[7] Sanitize: filterValid() drops invalid enum IDs, default signalWord="danger"
+       ↓
+[8] Clean up: delete temp PDF + all temp PNGs (finally block)
+       ↓
+Return { success: true, data: { ...15 fields } }
+```
+
+**Response shape:**
+```json
+{
+  "success": true,
+  "data": {
+    "chemicalName": "Toluene",
+    "casNumber": "108-88-3",
+    "formula": "C₇H₈",
+    "tradeName": "Methylbenzene",
+    "manufacturer": "Sigma-Aldrich",
+    "supplier": "...",
+    "signalWord": "danger",
+    "ghsPictograms": ["flame", "health-hazard", "exclamation-mark"],
+    "hazardClasses": ["flammable", "irritant", "reproductive-toxicant", "specific-target-organ-toxicity"],
+    "storageLocation": "",
+    "safetyInstructions": "...",
+    "emergencyContact": "...",
+    "personalProtectiveEquipment": ["Chemical splash goggles", "Nitrile gloves", "..."],
+    "firstAidMeasures": "...",
+    "firefightingMeasures": "...",
+    "accidentalReleaseMeasures": "..."
+  }
+}
+```
+
+**Key files:**
+- `src/app/api/admin/sds/extract/route.ts` — the API endpoint
+- `src/components/admin/chemical-manager.tsx` — the frontend `handleAutoFill()` function + "Auto-fill from PDF" button + review banner
+
+**System dependency:** `pdftoppm` (from poppler-utils) must be installed on the server. Already available in the sandbox; for production deployments, install via `apt-get install poppler-utils` (Debian/Ubuntu) or `brew install poppler` (macOS).
+
+**Cost:** Free — uses the in-house `z-ai-web-dev-sdk` VLM service. Each extraction uses ~3,000-10,000 tokens depending on PDF length.
 
 ### Auth
 | Method | Path | Purpose |
