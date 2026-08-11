@@ -458,3 +458,22 @@ Stage Summary:
 - Root cause: browser HTTP cache (max-age=3600) on a URL whose content can change underneath it.
 - Fix: no-store on the server + ?v={version} cache-busting on all client fetches.
 - SDS PDFs are safety-critical — serving a stale placeholder after admin uploaded the real document was a safety risk; this is now eliminated.
+
+---
+Task ID: BUGFIX-public-sds-stale
+Agent: Orchestrator
+Task: Fix "public/user side still shows old placeholder PDF after admin upload"
+
+Work Log:
+- Root cause analysis: getSdsBlobForChemical() in sync-engine.ts had a stale-version short-circuit:
+    const cached = await db.sdsBlobs.get(sds.id);
+    if (cached && cached.version === sds.version) return cached.blob;
+  When the admin uploaded a new PDF (server v2), the public user's local IndexedDB still had v1 metadata + v1 cached placeholder blob. The check `cached.version (1) === sds.version (1)` matched, so it returned the stale placeholder WITHOUT ever contacting the server. The ?v= cache-buster added in BUGFIX-sds-cache was irrelevant because fetch() was never called.
+- Fix 1 (critical): Rewrote getSdsBlobForChemical() to ALWAYS fetch fresh from the server when online (with { cache: "no-store" }), bypassing the stale local version check. The IndexedDB cache is now only used as an offline fallback. This guarantees the user sees the latest uploaded PDF.
+- Fix 2 (UX): Added a syncNow() trigger on ChemicalDetail mount so the SDS metadata (version badge, Available/Placeholder status) refreshes from the server when a user opens a chemical. The sync engine's 10s rate limiter prevents excessive calls.
+- Lint: clean. Agent Browser verified on public side: opened Capella WF 68, badge shows "Available", clicked "View SDS PDF", VLM confirmed the real Caltex/Chevron SDS renders (not the placeholder).
+
+Stage Summary:
+- Public-side SDS now always reflects the latest admin upload when online.
+- Offline fallback to IndexedDB cache preserved.
+- Both admin and public sides verified working end-to-end.

@@ -36,10 +36,10 @@ import { GhsPictogramBadge } from "@/components/ghs/pictograms";
 import { useAppStore } from "@/store/app-store";
 import { HAZARD_CLASS_LABELS } from "@/types";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/local-db";
-import { getSdsBlobForChemical } from "@/lib/sync-engine";
+import { getSdsBlobForChemical, syncNow } from "@/lib/sync-engine";
 
 export function ChemicalDetail() {
   const chemical = useAppStore((s) => s.selectedChemical);
@@ -54,6 +54,18 @@ export function ChemicalDetail() {
     undefined
   );
   const [sdsLoading, setSdsLoading] = useState(false);
+
+  // When a chemical is opened, trigger a background sync so the SDS metadata
+  // (version, status badge) refreshes from the server. Without this, a user
+  // who loaded the page before the admin uploaded the real PDF would see a
+  // stale "Placeholder v1" badge until the next 5-minute periodic sync.
+  // The sync engine's rate limiter (10s) prevents excessive calls.
+  useEffect(() => {
+    if (!chemical || !navigator.onLine) return;
+    syncNow().catch(() => {
+      // Silently swallow — the PDF fetch in handleViewSds still works.
+    });
+  }, [chemical?.id]);
 
   const handleViewSds = async () => {
     if (!chemical) return;

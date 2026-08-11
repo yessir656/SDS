@@ -261,8 +261,20 @@ export function stopPeriodicSync(): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Get the SDS PDF blob for a chemical. Returns the cached blob if available,
- * or fetches it from the server if online. Returns null if unavailable.
+ * Get the SDS PDF blob for a chemical.
+ *
+ * SAFETY-CRITICAL: SDS PDFs must never show a stale placeholder after the
+ * admin has uploaded the real document. The local IndexedDB cache can lag
+ * behind the server (sync runs every 5 min, and the local SDS metadata may
+ * still report v1 while the server already has v2). If we trusted the local
+ * version check alone, we'd return the stale cached placeholder blob.
+ *
+ * Strategy:
+ *   1. When ONLINE: always fetch fresh bytes from the server. The download
+ *      route sets Cache-Control: no-store, so the browser HTTP cache won't
+ *      shadow us. Update the IndexedDB cache with the result so offline
+ *      viewings stay current.
+ *   2. When OFFLINE (or fetch fails): fall back to the IndexedDB cache.
  */
 export async function getSdsBlobForChemical(
   chemicalId: string
@@ -273,18 +285,18 @@ export async function getSdsBlobForChemical(
     .first();
   if (!sds) return null;
 
-  // Check the local cache first.
-  const cached = await db.sdsBlobs.get(sds.id);
-  if (cached && cached.version === sds.version) {
-    return cached.blob;
-  }
-
-  // If online, fetch and cache.
+  // When online, ALWAYS fetch fresh from the server. This guarantees the
+  // user sees the latest uploaded PDF, not a stale placeholder that was
+  // cached before the admin uploaded the real document.
   if (navigator.onLine) {
     try {
-      const res = await fetch(SDS_DOWNLOAD_ENDPOINT(sds.id, sds.version));
+      const res = await fetch(
+        SDS_DOWNLOAD_ENDPOINT(sds.id, sds.version),
+        { cache: "no-store" }
+      );
       if (res.ok) {
         const blob = await res.blob();
+        // Refresh the local cache so subsequent offline viewings are current.
         await db.sdsBlobs.put({
           sdsId: sds.id,
           blob,
@@ -294,9 +306,11 @@ export async function getSdsBlobForChemical(
         return blob;
       }
     } catch {
-      // Fall through to return null.
+      // Network error — fall through to the offline cache below.
     }
   }
 
-  return null;
+  // Offline (or fetch failed) — return the cached blob if available.
+  const cached = await db.sdsBlobs.get(sds.id);
+  return cached?.blob ?? null;
 }
