@@ -175,7 +175,7 @@ export function SdsManager() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
-                          <a href={`/api/sds/${r.id}/download`} target="_blank" rel="noopener noreferrer">
+                          <a href={`/api/sds/${r.id}/download?v=${r.version}`} target="_blank" rel="noopener noreferrer">
                             <Button size="icon" variant="ghost" className="h-8 w-8" title="View SDS">
                               <ExternalLink className="h-4 w-4" />
                             </Button>

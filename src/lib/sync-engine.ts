@@ -29,7 +29,12 @@ import { db } from "@/lib/local-db";
 import type { ChemicalRecord, SdsDocumentRecord } from "@/types";
 
 const SYNC_ENDPOINT = "/api/sync";
-const SDS_DOWNLOAD_ENDPOINT = (id: string) => `/api/sds/${id}/download`;
+// Append ?v=<version> as a cache-buster. The server ignores this query param,
+// but it forces the browser HTTP cache to treat each version as a distinct
+// resource — critical so a newly-uploaded PDF isn't shadowed by a cached
+// placeholder at the same URL.
+const SDS_DOWNLOAD_ENDPOINT = (id: string, version?: number) =>
+  `/api/sds/${id}/download${version != null ? `?v=${version}` : ""}`;
 const PERIODIC_SYNC_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 // ---------------------------------------------------------------------------
@@ -205,7 +210,7 @@ async function syncSdsBlobs(): Promise<number> {
     if (cached && cached.version === sds.version) continue;
 
     try {
-      const res = await fetch(SDS_DOWNLOAD_ENDPOINT(sds.id));
+      const res = await fetch(SDS_DOWNLOAD_ENDPOINT(sds.id, sds.version));
       if (!res.ok) continue;
 
       const blob = await res.blob();
@@ -277,7 +282,7 @@ export async function getSdsBlobForChemical(
   // If online, fetch and cache.
   if (navigator.onLine) {
     try {
-      const res = await fetch(SDS_DOWNLOAD_ENDPOINT(sds.id));
+      const res = await fetch(SDS_DOWNLOAD_ENDPOINT(sds.id, sds.version));
       if (res.ok) {
         const blob = await res.blob();
         await db.sdsBlobs.put({

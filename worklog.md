@@ -438,3 +438,23 @@ Stage Summary:
 - Frontend: src/components/admin/chemical-manager.tsx (Auto-fill button, handleAutoFill, loading/error/review banners)
 - System dependency: pdftoppm (poppler-utils) — already available in sandbox; install via apt/brew for production
 - ADMIN_GUIDE.md and DEVELOPER_GUIDE.md updated with full documentation
+
+---
+Task ID: BUGFIX-sds-cache
+Agent: Orchestrator
+Task: Fix "PDF doesn't change even after upload" — admin uploads a new SDS PDF but the browser keeps showing the old/placeholder PDF.
+
+Work Log:
+- Inspected /api/sds/[id]/download/route.ts — found Cache-Control: public, max-age=3600 which caused the browser to serve the cached placeholder for up to 1 hour after a replacement upload (same SDS id = same URL = stale cache hit).
+- Fixed the download route:
+    * Changed Cache-Control to "no-store, must-revalidate" + Pragma: no-cache + Expires: 0
+    * Added a strong ETag derived from sds.contentHash
+    * Added If-None-Match handling → 304 short-circuit (preserves bandwidth while never serving stale bytes)
+- Fixed sds-manager.tsx admin "View SDS" link to append ?v={r.version} as a cache-buster.
+- Fixed sync-engine.ts SDS_DOWNLOAD_ENDPOINT to accept an optional version param and append ?v={version} to both fetch calls (syncSdsBlobs + getSdsBlobForChemical). This ensures the browser HTTP cache treats each version as a distinct resource.
+- Lint: clean. Dev server confirmed serving download?v=1 and download?v=2 with 200.
+
+Stage Summary:
+- Root cause: browser HTTP cache (max-age=3600) on a URL whose content can change underneath it.
+- Fix: no-store on the server + ?v={version} cache-busting on all client fetches.
+- SDS PDFs are safety-critical — serving a stale placeholder after admin uploaded the real document was a safety risk; this is now eliminated.
