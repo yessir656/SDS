@@ -181,7 +181,7 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 | Public catalog shows stale data after admin edit | Sync hasn't fired yet | Sync runs on startup / online transition / periodically. A page refresh while online forces a re-check. |
 | Field user still sees the old placeholder PDF after you uploaded the real one | IndexedDB cache lag (fixed) | The public "View SDS PDF" button now always fetches fresh from the server when online. Ask the user to hard-refresh once. Confirm the SDS `version` incremented in the admin SDS tab. |
 | Dashboard shows 0 chemicals | Database not seeded | `bun run db:push && bun run db:seed`, then restart |
-| "Auto-fill failed: spawn pdftoppm ENOENT" when using Auto-fill from PDF | Poppler (a system tool) is not installed on the server / your machine | Install Poppler and restart the dev server: macOS `brew install poppler`, Debian/Ubuntu `sudo apt-get install poppler-utils`, Windows → download from [poppler-windows releases](https://github.com/oschwartz10612/poppler-windows/releases) and add `bin\` to PATH. All other features work without Poppler. |
+| "Auto-fill failed: spawn pdftoppm ENOENT" | ~~Poppler not installed~~ **Fixed** — the app now uses a pure-JavaScript PDF renderer. If you see this error, pull the latest code and run `bun install`. |
 
 ---
 

@@ -4,14 +4,13 @@
 //
 //   Accepts a multipart upload containing an SDS PDF file. The endpoint:
 //     1. Validates the file (auth + magic bytes + MIME + extension + size).
-//     2. Writes the PDF to a temp file in os.tmpdir().
-//     3. Runs `pdftoppm -png -r 150 -l 5` to rasterize the first 5 pages.
-//     4. Reads each PNG and base64-encodes it.
-//     5. Sends all images to the in-house VLM (z-ai-web-dev-sdk) with a
+//     2. Rasterizes the first 5 pages to PNG using a pure-JavaScript renderer
+//        (pdfjs-dist + @napi-rs/canvas) — NO system dependencies required.
+//     3. Base64-encodes each PNG.
+//     4. Sends all images to the in-house VLM (z-ai-web-dev-sdk) with a
 //        structured extraction prompt that maps SDS fields to our schema.
-//     6. Parses the JSON response, validates enum values, sanitizes strings.
-//     7. Cleans up ALL temp files in a `finally` block.
-//     8. Returns { success: true, data: { ...fields } }.
+//     5. Parses the JSON response, validates enum values, sanitizes strings.
+//     6. Returns { success: true, data: { ...fields } }.
 //
 //   Admin-only. Server-side authorization enforced via requireAdmin().
 // ============================================================================
@@ -24,15 +23,8 @@ import {
   ALLOWED_SDS_EXTENSIONS,
 } from "@/lib/validation";
 import { isPdf } from "@/lib/storage";
-import { promises as fs } from "fs";
-import { execFile } from "child_process";
-import { promisify } from "util";
-import os from "os";
-import path from "path";
-import crypto from "crypto";
+import { rasterizePdfToPngs } from "@/lib/pdf-rasterize";
 import ZAI from "z-ai-web-dev-sdk";
-
-const execFileAsync = promisify(execFile);
 
 // Allow this route up to 60s — VLM extraction of multi-page PDFs takes ~10-15s.
 export const maxDuration = 60;
@@ -167,18 +159,6 @@ function filterValid<T extends string>(arr: string[], valid: Set<T>): T[] {
   return out;
 }
 
-/** Delete a file if it exists (silent on ENOENT). */
-async function safeUnlink(p: string): Promise<void> {
-  try {
-    await fs.unlink(p);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      // Swallow — best-effort cleanup.
-      console.warn(`Failed to delete temp file ${p}:`, (err as Error).message);
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
 // POST handler
 // ---------------------------------------------------------------------------
@@ -272,71 +252,18 @@ export async function POST(request: Request) {
   }
 
   // ---------------------------------------------------------------------------
-  // Write the PDF to a temp file and rasterize it with pdftoppm.
+  // Rasterize the PDF to PNG images using a pure-JavaScript renderer.
+  // No system dependencies (Poppler/pdftoppm) required — pdfjs-dist +
+  // @napi-rs/canvas run entirely in-process.
   // ---------------------------------------------------------------------------
-  const uid = crypto.randomUUID();
-  const tempPdf = path.join(os.tmpdir(), `sds-extract-${uid}.pdf`);
-  const pngPrefix = path.join(os.tmpdir(), `sds-extract-${uid}`);
-  const pngFiles: string[] = [];
-
+  let pageImages: string[];
   try {
-    await fs.writeFile(tempPdf, buffer);
-
-    // pdftoppm -png -r 150 -l 5 <pdf> <prefix>
-    //   → generates <prefix>-1.png, <prefix>-2.png, ... (up to 5 pages)
-    try {
-      await execFileAsync("pdftoppm", [
-        "-png",
-        "-r",
-        "150",
-        "-l",
-        "5", // last page = 5
-        tempPdf,
-        pngPrefix,
-      ]);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Detect the most common failure — Poppler not installed — and give a
-      // clear, actionable install hint instead of the raw ENOENT string.
-      const isMissing = /ENOENT|not found|command not found/i.test(msg);
-      return NextResponse.json(
-        {
-          success: false,
-          error: isMissing
-            ? "Poppler is not installed. The AI auto-fill feature needs the `pdftoppm` tool from Poppler to convert PDF pages into images. Install it and restart the dev server: macOS → `brew install poppler`; Debian/Ubuntu → `sudo apt-get install poppler-utils`; Windows → download from https://github.com/oschwartz10612/poppler-windows/releases and add the `bin` folder to PATH."
-            : `Failed to rasterize PDF: ${msg}`,
-        },
-        { status: 500 }
-      );
-    }
-
-    // ---------------------------------------------------------------------------
-    // Discover and read the generated PNG files.
-    // pdftoppm zero-pads the page number suffix on multi-digit page counts,
-    // but for ≤9 pages it emits `<prefix>-1.png`, `<prefix>-2.png`, etc.
-    // Use a directory scan to robustly find them.
-    // ---------------------------------------------------------------------------
-    const tmpDir = os.tmpdir();
-    const allEntries = await fs.readdir(tmpDir);
-    const prefixBasename = path.basename(pngPrefix);
-    for (const entry of allEntries) {
-      // Match: <prefixBasename>-<digits>.png
-      if (
-        entry.startsWith(`${prefixBasename}-`) &&
-        entry.endsWith(".png")
-      ) {
-        pngFiles.push(path.join(tmpDir, entry));
-      }
-    }
-
-    // Sort numerically by the page number suffix so the VLM reads in order.
-    pngFiles.sort((a, b) => {
-      const ra = parseInt(a.match(/-(\d+)\.png$/)?.[1] ?? "0", 10);
-      const rb = parseInt(b.match(/-(\d+)\.png$/)?.[1] ?? "0", 10);
-      return ra - rb;
+    const pngBuffers = await rasterizePdfToPngs(buffer, {
+      maxPages: 5,
+      scale: 2.0, // ≈ 150 DPI on a standard 72 DPI PDF viewport
     });
 
-    if (pngFiles.length === 0) {
+    if (pngBuffers.length === 0) {
       return NextResponse.json(
         {
           success: false,
@@ -346,17 +273,23 @@ export async function POST(request: Request) {
       );
     }
 
-    // Read each PNG as base64 (cap at 5 to be safe).
-    const pageImages = await Promise.all(
-      pngFiles.slice(0, 5).map(async (p) => {
-        const b = await fs.readFile(p);
-        return b.toString("base64");
-      })
+    // Base64-encode each PNG for the VLM image_url content blocks.
+    pageImages = pngBuffers.map((b) => b.toString("base64"));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      {
+        success: false,
+        error: `Failed to rasterize PDF: ${msg}`,
+      },
+      { status: 500 }
     );
+  }
 
-    // ---------------------------------------------------------------------------
-    // Build the VLM message and call createVision.
-    // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Build the VLM message and call createVision.
+  // ---------------------------------------------------------------------------
+  try {
     const zai = await ZAI.create();
 
     const content: Array<
@@ -458,13 +391,12 @@ export async function POST(request: Request) {
     };
 
     return NextResponse.json({ success: true, data });
-  } finally {
-    // ---------------------------------------------------------------------------
-    // ALWAYS clean up temp files — never leave them on disk.
-    // ---------------------------------------------------------------------------
-    await safeUnlink(tempPdf);
-    for (const p of pngFiles) {
-      await safeUnlink(p);
-    }
+  } catch (err) {
+    // Catch-all for any unhandled error in the VLM / parsing stages.
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { success: false, error: `Extraction failed: ${msg}` },
+      { status: 500 }
+    );
   }
 }

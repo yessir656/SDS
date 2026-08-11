@@ -43,6 +43,11 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
+  // @napi-rs/canvas ships a pre-built native .node binary that Next.js's
+  // turbopack bundler cannot resolve. Marking it as a server external package
+  // tells Next.js to require it at runtime from node_modules instead of trying
+  // to bundle it. Same for pdfjs-dist (large, uses dynamic imports).
+  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
   async headers() {
     return [
       {
