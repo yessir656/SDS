@@ -140,11 +140,25 @@ Manage the actual PDF files. Each chemical has exactly one SDS document (1:1).
 
 ### Setup for local development (when not using the sandbox)
 
-The default AI provider (`zai`) only works inside the Z.ai cloud sandbox. If you're running the app on your own machine and want the AI auto-fill to work, pick one of these providers and configure it in your `.env` file:
+The default AI provider (`zai`) only works inside the Z.ai cloud sandbox. If you're running the app on your own machine and want the AI auto-fill to work, use **Google Gemini** (free, recommended):
+
+**Gemini setup (3 steps):**
+
+1. **Get a free API key** at https://aistudio.google.com/apikey (1,500 requests/day free — a lab with 200 SDS PDFs will never exhaust this).
+2. **Add to your `.env` file:**
+   ```bash
+   AI_PROVIDER=gemini
+   GEMINI_API_KEY=your-key-here
+   ```
+   The `@google/generative-ai` package is already installed — no need to run `bun add`.
+3. **Restart the dev server:** `bun run dev`
+
+That's it. The default model is `gemini-2.0-flash` (newer, faster, better vision). If you need to override it, add `GEMINI_MODEL=gemini-1.5-flash` to `.env`.
+
+**Other providers** (if you prefer paid options):
 
 | Provider | Cost | Setup |
 |---|---|---|
-| **Google Gemini** ⭐ recommended | Free (1,500/day) | 1. `bun add @google/generative-ai`<br>2. Get a key: https://aistudio.google.com/apikey<br>3. In `.env`: `AI_PROVIDER=gemini` and `GEMINI_API_KEY=<your-key>` |
 | OpenAI | ~$0.01 per SDS | 1. `bun add openai`<br>2. Get a key: https://platform.openai.com/api-keys<br>3. In `.env`: `AI_PROVIDER=openai` and `OPENAI_API_KEY=<your-key>` |
 | Anthropic Claude | ~$0.02 per SDS | 1. `bun add @anthropic-ai/sdk`<br>2. Get a key: https://console.anthropic.com/settings/keys<br>3. In `.env`: `AI_PROVIDER=anthropic` and `ANTHROPIC_API_KEY=<your-key>` |
 

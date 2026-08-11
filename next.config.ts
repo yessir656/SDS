@@ -46,8 +46,13 @@ const nextConfig: NextConfig = {
   // @napi-rs/canvas ships a pre-built native .node binary that Next.js's
   // turbopack bundler cannot resolve. Marking it as a server external package
   // tells Next.js to require it at runtime from node_modules instead of trying
-  // to bundle it. Same for pdfjs-dist (large, uses dynamic imports).
-  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
+  // to bundle it. Same for pdfjs-dist (large, uses dynamic imports) and
+  // @google/generative-ai (uses dynamic imports for streaming).
+  serverExternalPackages: [
+    "@napi-rs/canvas",
+    "pdfjs-dist",
+    "@google/generative-ai",
+  ],
   async headers() {
     return [
       {

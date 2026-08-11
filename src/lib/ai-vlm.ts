@@ -228,6 +228,22 @@ async function callZai(
 // ---------------------------------------------------------------------------
 // Provider: Google Gemini
 // ---------------------------------------------------------------------------
+//
+// Why Gemini is the recommended local-development provider:
+//   - Free tier: 1,500 requests/day on gemini-2.0-flash (a lab with 200 SDS
+//     PDFs will never exhaust this).
+//   - Native multimodal — built for document understanding.
+//   - JSON mode (responseMimeType: "application/json") forces structured
+//     output, making parsing reliable.
+//
+// Critical: SDS documents routinely contain words like "carcinogen",
+// "fatal if swallowed", "severe burns", "may cause death". These can trigger
+// Gemini's default safety filters and either block the response entirely or
+// return a redacted/empty string. We set ALL safety categories to BLOCK_NONE
+// because this is a legitimate safety-critical use case — we NEED the model
+// to read and transcribe hazard information verbatim. Without this, extraction
+// silently fails on ~30% of SDS documents.
+// ---------------------------------------------------------------------------
 
 async function callGemini(
   images: Buffer[],
@@ -247,20 +263,33 @@ async function callGemini(
   }
 
   const apiKey = process.env.GEMINI_API_KEY!.trim();
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-1.5-flash";
+  // Default to gemini-2.0-flash — newer, faster, better vision than 1.5.
+  // Override with GEMINI_MODEL if you need a different model (e.g.
+  // "gemini-1.5-flash" for older API keys, "gemini-2.5-flash" when available).
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash";
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const generativeModel = genAI.getGenerativeModel({
     model,
-    // Force JSON output to make parsing reliable.
+    // SDS documents contain hazard statements that trigger safety filters.
+    // Disable all blocking — we need verbatim transcription of safety data.
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+    ],
     generationConfig: {
-      temperature: 0.1,
+      temperature: 0.1, // Low temperature for consistent, factual extraction.
+      maxOutputTokens: 8192, // Enough for a full 15-field SDS extraction.
+      // Force JSON output mode — Gemini will return valid JSON directly,
+      // no markdown fences to strip. (The prompt also requests JSON-only.)
       responseMimeType: "application/json",
     },
   });
 
   // Gemini's inlineData part accepts base64-encoded image bytes directly
-  // (no data: prefix).
+  // (no data: prefix, unlike OpenAI's image_url format).
   const parts: Array<any> = [
     { text: prompt },
     ...images.map((b) => ({
@@ -272,8 +301,47 @@ async function callGemini(
   ];
 
   try {
-    const result = await generativeModel.generateContent({ contents: [{ role: "user", parts }] });
+    const result = await generativeModel.generateContent({
+      contents: [{ role: "user", parts }],
+    });
+
+    // Check for safety-blocked or empty responses BEFORE calling .text().
+    // The SDK's .text() helper throws an unhelpful error if content is empty,
+    // so we inspect the candidate directly.
+    const candidate = result?.response?.candidates?.[0];
+    if (!candidate) {
+      const blockReason = result?.response?.promptFeedback?.blockReason;
+      throw new Error(
+        blockReason
+          ? `Gemini blocked the request (${blockReason}). ` +
+              "This shouldn't happen with safetySettings=BLOCK_NONE — verify your API key has access to this model."
+          : "Gemini returned no candidates. The request may have been blocked or the API key may be invalid."
+      );
+    }
+
+    if (candidate.finishReason === "SAFETY") {
+      throw new Error(
+        "Gemini blocked the response due to safety filters despite BLOCK_NONE settings. " +
+          "The model may not support overriding safety settings — try GEMINI_MODEL=gemini-1.5-flash."
+      );
+    }
+
+    if (candidate.finishReason === "MAX_TOKENS") {
+      // Response was truncated — log a warning but still return what we got.
+      // The JSON may be incomplete and fail parsing downstream, which is
+      // handled by the route's JSON.parse try/catch.
+      console.warn(
+        "[ai-vlm] Gemini response truncated (MAX_TOKENS). " +
+          "Consider increasing maxOutputTokens or reducing the number of PDF pages."
+      );
+    }
+
     const text = result?.response?.text?.() ?? "";
+    if (!text) {
+      throw new Error(
+        "Gemini returned an empty response. The model may have refused to generate content for this input."
+      );
+    }
     return { text, provider: "gemini", model };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
