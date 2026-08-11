@@ -296,10 +296,15 @@ export async function POST(request: Request) {
       ]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // Detect the most common failure — Poppler not installed — and give a
+      // clear, actionable install hint instead of the raw ENOENT string.
+      const isMissing = /ENOENT|not found|command not found/i.test(msg);
       return NextResponse.json(
         {
           success: false,
-          error: `Failed to rasterize PDF: ${msg}`,
+          error: isMissing
+            ? "Poppler is not installed. The AI auto-fill feature needs the `pdftoppm` tool from Poppler to convert PDF pages into images. Install it and restart the dev server: macOS → `brew install poppler`; Debian/Ubuntu → `sudo apt-get install poppler-utils`; Windows → download from https://github.com/oschwartz10612/poppler-windows/releases and add the `bin` folder to PATH."
+            : `Failed to rasterize PDF: ${msg}`,
         },
         { status: 500 }
       );

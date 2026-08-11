@@ -477,3 +477,19 @@ Stage Summary:
 - Public-side SDS now always reflects the latest admin upload when online.
 - Offline fallback to IndexedDB cache preserved.
 - Both admin and public sides verified working end-to-end.
+
+---
+Task ID: BUGFIX-poppler-enent
+Agent: Orchestrator
+Task: User reported "spawn pdftoppm ENOENT" error when clicking "Auto-fill from PDF" on their local machine.
+
+Work Log:
+- Root cause: pdftoppm (from Poppler) is a system binary required by the AI extraction endpoint to rasterize PDF pages into PNGs for the vision model. It's installed on this sandbox (/usr/bin/pdftoppm v25.03.0, in the dev server's PATH) but NOT on the user's local machine. Verified the feature works on sandbox: direct pdftoppm test exit code 0, dev log shows successful POST /api/admin/sds/extract 200 responses (3.7s, 13.9s).
+- Code fix: Improved the error response in /api/admin/sds/extract/route.ts. When the pdftoppm spawn fails with ENOENT/not-found, the API now returns a clear, actionable message with install hints for macOS/Debian/Ubuntu/Windows instead of the raw "spawn pdftoppm ENOENT" string.
+- Docs fix 1 (DEVELOPER_GUIDE.md): Added Poppler to the §0.1 Prerequisites table (was buried in §6.1 only). Expanded the Windows note with WSL-first guidance + PATH restart reminder. Added a troubleshooting row for the ENOENT error.
+- Docs fix 2 (ADMIN_GUIDE.md): Added a troubleshooting row explaining the error and install commands for each OS.
+
+Stage Summary:
+- This is an environment issue, not a code bug. The code + feature are verified working on the sandbox.
+- On any machine without Poppler, every feature works EXCEPT "Auto-fill from PDF" — chemical CRUD, SDS upload/view, sync, search, emergency mode all function normally.
+- The error message is now self-documenting: admins see install instructions directly in the UI toast.

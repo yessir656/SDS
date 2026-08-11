@@ -17,8 +17,9 @@
 | **Bun** (required) | The `db:seed` script and production `start` script run TypeScript / the standalone server via Bun. npm/node alone will **not** work. | https://bun.sh/docs/installation |
 | **Node.js 18+** | Next.js 16 needs it. Bun usually bundles a compatible runtime, but having Node helps with tooling. | https://nodejs.org/ |
 | **Git** | To clone the repo. | https://git-scm.com/ |
+| **Poppler** (`pdftoppm`) | Required **only** by the AI auto-fill feature (`POST /api/admin/sds/extract`). It converts PDF pages into PNG images so the vision model can read them. Without it, every other feature works, but "Auto-fill from PDF" fails with `spawn pdftoppm ENOENT`. | macOS: `brew install poppler` · Debian/Ubuntu: `sudo apt-get install poppler-utils` · Windows: [poppler-windows releases](https://github.com/oschwartz10612/poppler-windows/releases) (extract and add the `bin\` folder to `PATH`) |
 
-> **Windows users:** Install Bun with PowerShell (`irm bun.sh/install.ps1 | iex`). All commands below work in **Git Bash** or **WSL**. If you only have CMD/PowerShell, the `dev` script still works (it's just `next dev -p 3000`), but `db:seed` needs Bun regardless.
+> **Windows users:** Install Bun with PowerShell (`irm bun.sh/install.ps1 | iex`). All commands below work in **Git Bash** or **WSL**. If you only have CMD/PowerShell, the `dev` script still works (it's just `next dev -p 3000`), but `db:seed` needs Bun regardless. For Poppler on Windows, the easiest path is WSL (`sudo apt-get install poppler-utils`) — otherwise download the Windows build and add its `bin` folder to your system `PATH`, then **restart your terminal** so the dev server picks up the new PATH.
 
 ### 0.2 Step-by-Step (fresh clone)
 
@@ -665,6 +666,7 @@ Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hoo
 | SDS upload 413 | File too large | Check the size limit in `src/lib/validation.ts` / reverse proxy |
 | Dexie schema version conflict | Old client DB version | Bump Dexie schema version in `src/lib/local-db.ts` with an upgrade function |
 | Service worker not updating | Old SW cached | Bump `CACHE_VERSION` in `public/sw.js`; user will get new SW on next load |
+| `spawn pdftoppm ENOENT` when admin clicks "Auto-fill from PDF" | Poppler not installed on the host machine | Install it (see [§0.1 Prerequisites](#01-prerequisites)) and **restart the dev server** so it picks up the new PATH. The error response now includes install hints. |
 | Public user sees stale placeholder PDF after admin uploads the real one | Browser HTTP cache or stale IndexedDB blob | Fixed in code: download route sends `no-store`, `getSdsBlobForChemical()` always fetches fresh when online. If it recurs, hard-refresh the page and check the SDS `version` in Dexie |
 | Preview shows blank "Z" screen | Dev server not running | `bun run dev` (this is the most common "it's loading" report) |
 
