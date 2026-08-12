@@ -371,7 +371,7 @@ parsing, and field sanitization are identical across all of them.
 | `AI_PROVIDER` | Package | Default model | Free tier? | Works on local machine? |
 |---|---|---|---|---|
 | `zai` (default) | `z-ai-web-dev-sdk` | `glm-4.6v` | ✅ Always free | ❌ Sandbox-only (internal API) |
-| `gemini` ⭐ | `@google/generative-ai` (installed) | `gemini-2.0-flash` | ✅ 1,500 req/day | ✅ Yes |
+| `gemini` ⭐ | `@google/generative-ai` (installed) | `gemini-2.5-flash` | ✅ 1,500 req/day | ✅ Yes |
 | `openai` | `openai` | `gpt-4o-mini` | ❌ Paid (~$0.01/SDS) | ✅ Yes |
 | `anthropic` | `@anthropic-ai/sdk` | `claude-3-5-sonnet-20241022` | ❌ Paid (~$0.02/SDS) | ✅ Yes |
 
@@ -384,7 +384,7 @@ parsing, and field sanitization are identical across all of them.
    # 2. Add to .env:
    AI_PROVIDER=gemini
    GEMINI_API_KEY=your-key-here
-   # (optional) GEMINI_MODEL=gemini-2.0-flash  # default; other options: gemini-1.5-flash, gemini-2.5-flash
+   # (optional) GEMINI_MODEL=gemini-2.5-flash  # default; NOTE: 2.0-flash and 1.5-flash are retired (404)
    ```
 
 **Flow:**
@@ -464,15 +464,15 @@ Admin uploads PDF
 
 **Cost:**
 - `zai` — Free (in-house service, sandbox-only).
-- `gemini` — Free tier: 1,500 requests/day on `gemini-2.0-flash`. A lab with 200 SDS PDFs will never exhaust this.
+- `gemini` — Free tier: 1,500 requests/day on `gemini-2.5-flash`. A lab with 200 SDS PDFs will never exhaust this.
 - `openai` — ~$0.01 per extraction on `gpt-4o-mini` (~3K-10K tokens).
 - `anthropic` — ~$0.02 per extraction on `claude-3-5-sonnet`.
 
 **Gemini-specific notes (important):**
 - **Safety filters are disabled** (`BLOCK_NONE` for all 4 HARM categories). SDS documents routinely contain words like "carcinogen", "fatal if swallowed", "severe burns" that trigger Gemini's default safety filters and silently block the response. Without this setting, extraction fails on ~30% of SDS documents.
 - **JSON mode is enabled** (`responseMimeType: "application/json"`) — Gemini returns valid JSON directly, no markdown fences to strip.
-- **Model defaults to `gemini-2.0-flash`** — newer, faster, and better at vision than 1.5. Override with `GEMINI_MODEL` env var if needed.
-- If you see "Gemini blocked the response due to safety filters", try `GEMINI_MODEL=gemini-1.5-flash` (some 2.0 models restrict safety overrides).
+- **Model defaults to `gemini-2.5-flash`** — current generation, fast, good vision. Override with `GEMINI_MODEL` env var if needed. ⚠️ `gemini-2.0-flash` / `gemini-1.5-flash` are retired on the Gemini API (404 "model is no longer available") — don't set them.
+- If you see "Gemini blocked the response due to safety filters", try a different `GEMINI_MODEL` (safety override support varies by model).
 
 ### Auth
 | Method | Path | Purpose |

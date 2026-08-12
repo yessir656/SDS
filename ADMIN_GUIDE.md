@@ -153,7 +153,7 @@ The default AI provider (`zai`) only works inside the Z.ai cloud sandbox. If you
    The `@google/generative-ai` package is already installed — no need to run `bun add`.
 3. **Restart the dev server:** `bun run dev`
 
-That's it. The default model is `gemini-2.0-flash` (newer, faster, better vision). If you need to override it, add `GEMINI_MODEL=gemini-1.5-flash` to `.env`.
+That's it. The default model is `gemini-2.5-flash` (current generation, fast, good vision). If you need to override it, add `GEMINI_MODEL=<model>` to `.env`. Note: `gemini-2.0-flash` and `gemini-1.5-flash` have been retired by Google — using them returns a "model is no longer available" error.
 
 **Other providers** (if you prefer paid options):
 

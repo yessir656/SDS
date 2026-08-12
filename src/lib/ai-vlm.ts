@@ -15,7 +15,7 @@
 //                           free, uses /etc/.z-ai-config auto-configured on
 //                           the Z.ai cloud sandbox)
 //   AI_PROVIDER=gemini    → Google Gemini (@google/generative-ai)
-//                           Free tier: 1,500 req/day on gemini-1.5-flash
+//                           Free tier: 1,500 req/day on gemini-3.6-flash
 //                           Get a key: https://aistudio.google.com/apikey
 //   AI_PROVIDER=openai    → OpenAI (openai SDK, gpt-4o-mini)
 //                           Get a key: https://platform.openai.com/api-keys
@@ -230,7 +230,7 @@ async function callZai(
 // ---------------------------------------------------------------------------
 //
 // Why Gemini is the recommended local-development provider:
-//   - Free tier: 1,500 requests/day on gemini-2.0-flash (a lab with 200 SDS
+//   - Free tier: 1,500 requests/day on gemini-3.6-flash (a lab with 200 SDS
 //     PDFs will never exhaust this).
 //   - Native multimodal — built for document understanding.
 //   - JSON mode (responseMimeType: "application/json") forces structured
@@ -263,10 +263,11 @@ async function callGemini(
   }
 
   const apiKey = process.env.GEMINI_API_KEY!.trim();
-  // Default to gemini-2.0-flash — newer, faster, better vision than 1.5.
-  // Override with GEMINI_MODEL if you need a different model (e.g.
-  // "gemini-1.5-flash" for older API keys, "gemini-2.5-flash" when available).
-  const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash";
+  // Default to gemini-3.6-flash — current generation, fast, good vision.
+  // NOTE: gemini-2.0-flash, gemini-1.5-flash and gemini-2.5-flash are RETIRED
+  // on the Gemini API (404 "model no longer available"). Override with
+  // GEMINI_MODEL only if you know the model is still served.
+  const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const generativeModel = genAI.getGenerativeModel({
@@ -322,7 +323,7 @@ async function callGemini(
     if (candidate.finishReason === "SAFETY") {
       throw new Error(
         "Gemini blocked the response due to safety filters despite BLOCK_NONE settings. " +
-          "The model may not support overriding safety settings — try GEMINI_MODEL=gemini-1.5-flash."
+          "The model may not support overriding safety settings — try a different GEMINI_MODEL."
       );
     }
 
