@@ -255,3 +255,30 @@ Stage Summary:
 - One discrepancy between the task description and the actual code noted for future reference: the audit-log route's action-prefix filter query parameter is named `action` in the actual code (`src/app/api/admin/audit/route.ts` line 31: `url.searchParams.get("action")`), NOT `actionPrefix` as the task description suggested. Docs use the actual code's parameter name (`action`) per the "code is the truth" rule from §16.
 - One minor pre-existing inaccuracy left untouched per task scope: line 256 in §3 File Map says "src/middleware.ts Edge-level /admin/* protection (role=ADMIN)" — this is technically outdated (now accepts SUPER_ADMIN || ADMIN) but the task only specified §4/§6/§8/§13/§15/§16 for updates. The §16 table row for NextAuth + the §8 Authorization subsection both fully describe the current middleware behavior, so the inconsistency is contained to a one-line file-map note.
 - No code files were modified. Only documentation updated.
+
+---
+Task ID: DOC-FIX-PPE-1
+Agent: Orchestrator
+Task: Correct PPE status in aug12-meeting.md — was incorrectly marked "PARTIALLY IMPLEMENTED" when it is actually fully implemented.
+
+Work Log:
+- User flagged that the aug12-meeting.md addendum marked §3.3 PPE Requirements as "PARTIALLY IMPLEMENTED" despite the feature being complete.
+- Verified the actual state by reading the code:
+  * `prisma/schema.prisma` — `personalProtectiveEquipment String @default("[]")` on Chemical ✅
+  * `src/types/index.ts` — `PpeItem`, `PpeCode` types with 12 canonical codes ✅
+  * `src/lib/ppe.ts` — full normalization layer (`normalizePpe`, `parsePpeText`, `detectPpeCode`) ✅
+  * `src/components/common/PpeList.tsx` — reusable component with inline SVG icons, 3 layouts (default/compact/iconsOnly), color-coded, dark mode ✅
+  * `src/components/catalog/chemical-card.tsx:101` — compact pills in catalog ✅
+  * `src/components/detail/chemical-detail.tsx:151,389` — header popover + dedicated "Required PPE" card ✅
+  * `src/components/emergency/emergency-view.tsx:166,185` — dedicated "Required PPE" section + icon-only quick-scan beside emergency contact (exactly as meeting proposed) ✅
+  * `src/components/admin/chemical-manager.tsx:742-747` — admin textarea for editing PPE with parenthesis-note convention ✅
+  * `src/lib/ai-vlm.ts` — AI extraction prompt includes PPE from SDS Section 8 ✅
+  * `src/lib/seed-data.ts` — all 14 seeded chemicals have realistic PPE arrays ✅
+- Edited `/home/z/my-project/aug12-meeting.md` §3.3: changed heading from "PARTIALLY IMPLEMENTED" to "FULLY IMPLEMENTED" and rewrote the body to accurately describe all four rendering surfaces, the normalization layer, the admin editing UI, and the AI auto-fill integration.
+- Confirmed README.md and DEVELOPER_GUIDE.md do not have the same mistake — they correctly mention PPE in feature lists without claiming it is partial.
+- The only legitimate "PARTIALLY IMPLEMENTED" item remains §3.2 regulatoryTags (field + type + component exist, but seed data is empty arrays and no admin UI / filter is wired up).
+
+Stage Summary:
+- PPE status corrected in docs to match the code: FULLY IMPLEMENTED.
+- Root cause of the original mistake: conflating PPE (done) with regulatoryTags (genuinely partial) when writing the status addendum. The two fields look superficially similar in the schema (both are JSON string arrays on Chemical) but have very different completion states.
+- Lesson reinforced: §16 of DEVELOPER_GUIDE.md is right — "the code is the truth, update the docs to match." Should have grep'd for PpeList usage before writing the status.
