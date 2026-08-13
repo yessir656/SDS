@@ -11,6 +11,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/session";
 import { deleteFile, generateStorageKey, saveFile, computeHash } from "@/lib/storage";
 import { generatePlaceholderPdf } from "@/lib/pdf-placeholder";
+import { logAction, auditContext } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +66,17 @@ export async function DELETE(
       serverVersion: { increment: 1 },
       updatedById: session.user.id,
     },
+  });
+
+  const ctx = auditContext(session, _request);
+  await logAction({
+    ctx,
+    action: "sds.revert",
+    entityType: "sds",
+    entityId: id,
+    summary: `Reverted SDS for "${sds.chemical.chemicalName}" to placeholder`,
+    before: { version: sds.version, status: sds.status },
+    after: { status: "placeholder" },
   });
 
   return NextResponse.json({ success: true });

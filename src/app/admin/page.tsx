@@ -20,6 +20,9 @@ import {
   Loader2,
   RefreshCw,
   ExternalLink,
+  Users,
+  ShieldCheck,
+  ScrollText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,10 +41,14 @@ import { cn } from "@/lib/utils";
 import { AdminOverview } from "@/components/admin/admin-overview";
 import { ChemicalManager } from "@/components/admin/chemical-manager";
 import { SdsManager } from "@/components/admin/sds-manager";
+import { UserManager } from "@/components/admin/user-manager";
+import { AuditLogViewer } from "@/components/admin/audit-log-viewer";
 
 export default function AdminDashboardPage() {
   const { data: session, status } = useSession();
   const [activeTab, setActiveTab] = useState("overview");
+
+  const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
 
   // While the session is loading, show a spinner.
   if (status === "loading") {
@@ -73,6 +80,12 @@ export default function AdminDashboardPage() {
             <span className="text-base font-bold">SDS-CHEM Admin</span>
             <span className="text-[11px] text-muted-foreground">
               {session.user.email}
+              {isSuperAdmin && (
+                <span className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                  <ShieldCheck className="h-2.5 w-2.5" />
+                  SUPER
+                </span>
+              )}
             </span>
           </div>
 
@@ -112,6 +125,18 @@ export default function AdminDashboardPage() {
               <FileText className="h-4 w-4" />
               SDS Documents
             </TabsTrigger>
+            {isSuperAdmin && (
+              <TabsTrigger value="users" className="gap-2">
+                <Users className="h-4 w-4" />
+                Users
+              </TabsTrigger>
+            )}
+            {isSuperAdmin && (
+              <TabsTrigger value="audit" className="gap-2">
+                <ScrollText className="h-4 w-4" />
+                Audit Log
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="overview">
@@ -123,6 +148,16 @@ export default function AdminDashboardPage() {
           <TabsContent value="sds">
             <SdsManager />
           </TabsContent>
+          {isSuperAdmin && (
+            <TabsContent value="users">
+              <UserManager />
+            </TabsContent>
+          )}
+          {isSuperAdmin && (
+            <TabsContent value="audit">
+              <AuditLogViewer />
+            </TabsContent>
+          )}
         </Tabs>
       </main>
     </div>

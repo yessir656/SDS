@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/session";
 import { updateChemicalSchema } from "@/lib/validation";
 import { serializeChemical } from "@/lib/serialize";
+import { logAction, auditContext, snapshotChemical } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,17 @@ export async function PUT(
     data: updateData,
   });
 
+  const ctx = auditContext(session, request);
+  await logAction({
+    ctx,
+    action: "chemical.update",
+    entityType: "chemical",
+    entityId: id,
+    summary: `Updated chemical "${updated.chemicalName}"`,
+    before: snapshotChemical(existing),
+    after: snapshotChemical(updated),
+  });
+
   return NextResponse.json({ chemical: serializeChemical(updated) });
 }
 
@@ -115,6 +127,16 @@ export async function DELETE(
       serverVersion: { increment: 1 },
       updatedById: session.user.id,
     },
+  });
+
+  const ctx = auditContext(session, _request);
+  await logAction({
+    ctx,
+    action: "chemical.delete",
+    entityType: "chemical",
+    entityId: id,
+    summary: `Deleted chemical "${existing.chemicalName}"`,
+    before: snapshotChemical(existing),
   });
 
   return NextResponse.json({ success: true });

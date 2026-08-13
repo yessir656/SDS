@@ -21,12 +21,15 @@ model User {
   email        String   @unique
   passwordHash String
   name         String?
-  role         String   @default("USER") // "ADMIN" | "USER"
+  role         String   @default("USER") // "SUPER_ADMIN" | "ADMIN" | "USER"
+  disabled     Boolean  @default(false)  // super-admin can disable without deleting
+  lastLoginAt  DateTime?                  // updated on each successful sign-in
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   uploadedSds  SdsDocument[]
   updatedChemicals Chemical[]
+  auditLogs    AuditLog[]
 }
 
 // ---------------------------------------------------------------------------
@@ -103,4 +106,30 @@ model SdsDocument {
 
   @@index([updatedAt])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Audit Log — append-only trail of every administrative mutation.
+// Super-admins see the full log; regular admins see their own entries.
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?  // User.id of the actor (null for system actions)
+  actorEmail  String?  // Denormalized email so log survives user deletion
+  action      String   // e.g. "chemical.create", "sds.replace", "user.disable"
+  entityType  String   // "chemical" | "sds" | "user" | "session"
+  entityId    String   // id of the affected entity
+  summary     String   // Human-readable one-liner
+  before      String?  // JSON snapshot of state before (for updates/deletes)
+  after       String?  // JSON snapshot of state after (for creates/updates)
+  ipAddress   String?  // best-effort client IP
+  createdAt   DateTime @default(now())
+
+  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
 }

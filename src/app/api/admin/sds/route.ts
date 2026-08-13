@@ -31,6 +31,7 @@ import {
   computeHash,
   isPdf,
 } from "@/lib/storage";
+import { logAction, auditContext } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -178,6 +179,16 @@ export async function POST(request: Request) {
       serverVersion: { increment: 1 },
       updatedById: session.user.id,
     },
+  });
+
+  const ctx = auditContext(session, request);
+  await logAction({
+    ctx,
+    action: existingSds ? "sds.replace" : "sds.upload",
+    entityType: "sds",
+    entityId: sds.id,
+    summary: `${existingSds ? "Replaced" : "Uploaded"} SDS for "${chemical.chemicalName}" (v${sds.version}, ${file.name})`,
+    after: { chemicalId, version: sds.version, fileName: file.name, size: buffer.length },
   });
 
   return NextResponse.json({ success: true, sdsId: sds.id, version: sds.version });

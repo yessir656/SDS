@@ -12,6 +12,7 @@ import { createChemicalSchema } from "@/lib/validation";
 import { serializeChemical, serializeSds } from "@/lib/serialize";
 import { generateStorageKey, saveFile, computeHash } from "@/lib/storage";
 import { generatePlaceholderPdf } from "@/lib/pdf-placeholder";
+import { logAction, auditContext, snapshotChemical } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -122,6 +123,16 @@ export async function POST(request: Request) {
     });
 
     return { chem, sds };
+  });
+
+  const ctx = auditContext(session, request);
+  await logAction({
+    ctx,
+    action: "chemical.create",
+    entityType: "chemical",
+    entityId: chemical.chem.id,
+    summary: `Created chemical "${chemical.chem.chemicalName}"`,
+    after: snapshotChemical(chemical.chem),
   });
 
   return NextResponse.json(

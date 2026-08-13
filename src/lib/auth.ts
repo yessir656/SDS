@@ -41,9 +41,12 @@ export const authOptions: NextAuthOptions = {
         const email = credentials.email.trim().toLowerCase();
         const user = await db.user.findUnique({ where: { email } });
 
-        // Guard: user must exist AND be an admin. A non-admin "USER" role
-        // record cannot log in here — this endpoint is admin-only by design.
-        if (!user || user.role !== "ADMIN") return null;
+        // Guard: user must exist AND be an admin (either SUPER_ADMIN or ADMIN).
+        // A "USER" role record cannot log in here — this endpoint is admin-only.
+        if (!user || (user.role !== "SUPER_ADMIN" && user.role !== "ADMIN")) return null;
+
+        // Guard: super-admin can disable an account without deleting it.
+        if (user.disabled) return null;
 
         const valid = await verifyPassword(
           credentials.password,
@@ -51,11 +54,17 @@ export const authOptions: NextAuthOptions = {
         );
         if (!valid) return null;
 
+        // Record the login time for the user-management dashboard.
+        await db.user.update({
+          where: { id: user.id },
+          data: { lastLoginAt: new Date() },
+        }).catch(() => { /* non-critical */ });
+
         return {
           id: user.id,
           email: user.email,
           name: user.name ?? undefined,
-          role: user.role as "ADMIN" | "USER",
+          role: user.role as "SUPER_ADMIN" | "ADMIN" | "USER",
         };
       },
     }),
@@ -65,7 +74,7 @@ export const authOptions: NextAuthOptions = {
       // `user` is only present on first sign-in; persist id + role into JWT.
       if (user) {
         token.id = user.id;
-        token.role = (user as { role: "ADMIN" | "USER" }).role;
+        token.role = (user as { role: "SUPER_ADMIN" | "ADMIN" | "USER" }).role;
       }
       return token;
     },

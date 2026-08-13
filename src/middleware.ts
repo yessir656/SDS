@@ -14,8 +14,10 @@ export default withAuth({
   },
   callbacks: {
     authorized: ({ token }) => {
-      // Only allow tokens with the ADMIN role.
-      return token?.role === "ADMIN";
+      // Allow both SUPER_ADMIN and ADMIN to reach /admin/* pages.
+      // API-level super-admin-only routes (users, audit) enforce the stricter
+      // check server-side via requireSuperAdmin().
+      return token?.role === "SUPER_ADMIN" || token?.role === "ADMIN";
     },
   },
 });

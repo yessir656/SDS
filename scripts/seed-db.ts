@@ -53,16 +53,29 @@ async function seedAdmin() {
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
+    // Preserve an existing SUPER_ADMIN role — never downgrade a super-admin
+    // back to ADMIN on re-seed. Only upgrade a plain ADMIN to SUPER_ADMIN if
+    // the env explicitly requests it (see ADMIN_ROLE below).
+    const envRole = (process.env.ADMIN_ROLE || "").toUpperCase();
+    const nextRole =
+      existing.role === "SUPER_ADMIN"
+        ? "SUPER_ADMIN"
+        : envRole === "SUPER_ADMIN"
+          ? "SUPER_ADMIN"
+          : existing.role;
+
     await prisma.user.update({
       where: { email },
-      data: { passwordHash, role: "ADMIN" },
+      data: { passwordHash, role: nextRole },
     });
-    console.log(`✓ Admin user updated: ${email}`);
+    console.log(`✓ Admin user updated: ${email} (role=${nextRole})`);
   } else {
+    const envRole = (process.env.ADMIN_ROLE || "SUPER_ADMIN").toUpperCase();
+    const role = envRole === "ADMIN" ? "ADMIN" : "SUPER_ADMIN";
     await prisma.user.create({
-      data: { email, passwordHash, role: "ADMIN", name: "Administrator" },
+      data: { email, passwordHash, role, name: "Administrator" },
     });
-    console.log(`✓ Admin user created: ${email}`);
+    console.log(`✓ Admin user created: ${email} (role=${role})`);
   }
 }
 

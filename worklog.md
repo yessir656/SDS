@@ -73,3 +73,65 @@ Stage Summary:
 - Gemini integration method: @google/generative-ai SDK v0.24.1, v1beta API endpoint, BLOCK_NONE safety settings, JSON output mode (responseMimeType: application/json).
 - The running application was never disrupted (same dev server PID throughout, all existing routes verified working).
 - August 12 meeting notes preserved untouched in aug12-meeting.md. Action items NOT implemented (per user instruction — will discuss after Gemini fix).
+
+---
+Task ID: SUPERADMIN-1
+Agent: Orchestrator
+Task: Implement 3-tier role hierarchy (SUPER_ADMIN / ADMIN / USER) with user management + audit log, per user request to "improve the admin mis super admin". User confirmed: all-admins-see-all (no division scoping), yes on audit log, promote existing admin account, start with core.
+
+Work Log:
+- Inspected existing auth/role system: prisma schema had only ADMIN/USER roles, requireAdmin() gave every admin identical permissions, no user-management UI existed (user creation was seed-script only). This contradicted Meeting §4 which says MIS = Super Admin and division reps = regular admins.
+- Updated prisma/schema.prisma:
+  * User model: added `disabled Boolean @default(false)` and `lastLoginAt DateTime?` fields; updated role comment to "SUPER_ADMIN" | "ADMIN" | "USER".
+  * Added new AuditLog model: id, actorId (FK User, onDelete: SetNull), actorEmail (denormalized), action, entityType, entityId, summary, before (JSON), after (JSON), ipAddress, createdAt. 4 indexes (createdAt, actorId, entityType+entityId, action).
+- Ran `bun run db:push` — additive schema migration, safe for SQLite (no data loss). Prisma Client regenerated to v6.19.2.
+- Promoted existing admin user (admin@mirdc.dost.gov.ph, id cmsqwqnhk0000rh6hy6q1966w) from ADMIN → SUPER_ADMIN via one-off bun script. Verified via groupBy query: 1 SUPER_ADMIN, 0 other roles.
+- Updated src/types/next-auth.d.ts: extended role union to "SUPER_ADMIN" | "ADMIN" | "USER" in Session, User, and JWT interfaces.
+- Updated src/lib/auth.ts:
+  * authorize(): now allows SUPER_ADMIN or ADMIN (was ADMIN only); blocks disabled users; updates lastLoginAt on successful login (non-blocking).
+  * jwt callback: persists role as the new 3-tier union.
+- Updated src/lib/session.ts: rewrote with two helpers — requireAdmin() (accepts ADMIN or SUPER_ADMIN, for chemical/SDS routes) and requireSuperAdmin() (SUPER_ADMIN only, for user/audit routes).
+- Updated src/middleware.ts: authorized() now allows SUPER_ADMIN or ADMIN for /admin/* pages. API-level super-admin enforcement is server-side via requireSuperAdmin().
+- Updated scripts/seed-db.ts: seed now creates new admins as SUPER_ADMIN by default (configurable via ADMIN_ROLE env); preserves existing SUPER_ADMIN role on re-seed (never downgrades).
+- Created src/lib/audit.ts: logAction() helper that appends to AuditLog table; failures are swallowed (logged to stderr) so audit problems never break the main operation. Includes auditContext() builder (extracts actorId/email/IP from session+request) and snapshotChemical() helper.
+- Created src/app/api/admin/users/route.ts: GET (list all users, never returns passwordHash) + POST (create new admin with email/password/name/role). Both requireSuperAdmin().
+- Created src/app/api/admin/users/[id]/route.ts: PATCH (update name/role/disabled/password) + DELETE (permanent delete). Both requireSuperAdmin(). Includes lockout-prevention guards: cannot change own role away from SUPER_ADMIN, cannot disable self, cannot delete self, cannot disable/downgrade/delete the last active super-admin.
+- Created src/app/api/admin/audit/route.ts: GET with cursor pagination (limit+1 fetch trick), filters by entityType/actionPrefix/actorId. requireSuperAdmin().
+- Added audit logging to existing routes (non-breaking, fire-and-forget):
+  * chemicals/route.ts POST → chemical.create
+  * chemicals/[id]/route.ts PUT → chemical.update, DELETE → chemical.delete
+  * sds/route.ts POST → sds.upload or sds.replace (based on existingSds)
+  * sds/[id]/route.ts DELETE → sds.revert
+- Created src/components/admin/user-manager.tsx: full CRUD UI — searchable user table (email, name, role badge, status badge, last login, created date), Add User dialog (email/name/password/role), Edit User dialog (name/role/disable/password reset), Delete confirmation dialog. Self-protection: Delete button disabled for own account, role Select disabled for self when SUPER_ADMIN, explanatory hints shown.
+- Created src/components/admin/audit-log-viewer.tsx: paginated audit log table (newest first), filter by entity type + action prefix, expandable rows showing before/after JSON snapshots, color-coded entity badges (chemical=teal, sds=sky, user=amber, session=violet), "Load older entries" cursor pagination. Fixed React Fragment key warning by using <Fragment key={e.id}> instead of <>.
+- Updated src/app/admin/page.tsx: added conditional Users + Audit Log tabs (only rendered when session.user.role === "SUPER_ADMIN"); added amber "SUPER" badge next to email in header for super-admins.
+
+Dev Server Restart:
+- The Prisma Client changed (new AuditLog model), which requires a dev server restart because Node.js caches node_modules. Original dev server (PIDs 3221/3223/3235) was killed and restarted via `python3 .zscripts/dev-daemon.py` (the existing double-fork daemonizer). New server PIDs: 7879/7903. Port 3000 remained available throughout (verified with curl).
+
+Testing (Agent Browser v0.32.3 end-to-end):
+- ✅ Login as admin@mirdc.dost.gov.ph → redirected to /admin. Dashboard now shows 5 tabs (Overview, Chemicals, SDS Documents, Users, Audit Log). Header shows amber "SUPER" badge next to email.
+- ✅ Users tab: "1 super-admin" badge, table renders admin user with role=Super Admin, status=Active, lastLogin=just now (after re-login), created=8/13/2026. Delete button DISABLED for self (lockout prevention working).
+- ✅ Add User dialog: created test-admin@mirdc.dost.gov.ph with role=ADMIN. User appeared in table immediately.
+- ✅ Audit Log tab: showed 1 entry "Created ADMIN account test-admin@mirdc.dost.gov.ph (Test Admin)" with actor=admin@mirdc.dost.gov.ph, action=user.create, IP=::1, timestamp.
+- ✅ Expandable row: clicked entry, Before/After JSON panel expanded showing { email, name, role } snapshot.
+- ✅ Delete user: clicked Delete on test user → confirmation dialog → confirmed → user removed from table.
+- ✅ Audit Log now shows 2 entries: user.delete (newest) + user.create. Both with correct actor, action, summary, IP.
+- ✅ Sign out + sign back in: lastLoginAt updated to "just now" — confirms login tracking works.
+- ✅ Screenshots saved: verify-super-admin-users.png, verify-super-admin-final.png.
+- ✅ React key warning fixed (Fragment with key).
+- ✅ No console errors after fix.
+- ✅ All public routes still 200: /, /api/chemicals, /api/sync?since=0.
+- ✅ All admin routes still 401 for unauth: /api/admin/users, /api/admin/audit, /api/admin/chemicals, /api/admin/dashboard.
+- ✅ ESLint clean on all new/modified files (the only repo-wide lint error is in a pre-existing example file upload/SDS-extracted/SDS-main/examples/websocket/frontend.tsx, unrelated to this change).
+
+Stage Summary:
+- 3-tier role hierarchy implemented: SUPER_ADMIN (full access incl. user mgmt + audit log) > ADMIN (chemicals + SDS only) > USER (public PWA, cannot sign in).
+- User Manager: super-admins can create/edit/disable/delete admin accounts with full lockout prevention (cannot lock out self or remove last super-admin).
+- Audit Log: every chemical/SDS/user CRUD operation is recorded with actor, action, before/after JSON, IP, timestamp. Paginated viewer with filters + expandable detail rows.
+- Existing admin account promoted to SUPER_ADMIN. Re-seeding preserves the role.
+- All existing functionality preserved: public catalog, search, emergency mode, chemical CRUD, SDS upload, AI auto-fill, sync engine — all unchanged.
+- Dev server running on port 3000 (new PIDs 7879/7903 after Prisma client reload).
+- Files created: src/lib/audit.ts, src/app/api/admin/users/route.ts, src/app/api/admin/users/[id]/route.ts, src/app/api/admin/audit/route.ts, src/components/admin/user-manager.tsx, src/components/admin/audit-log-viewer.tsx (6 new files).
+- Files modified: prisma/schema.prisma, src/types/next-auth.d.ts, src/lib/auth.ts, src/lib/session.ts, src/middleware.ts, scripts/seed-db.ts, src/app/api/admin/chemicals/route.ts, src/app/api/admin/chemicals/[id]/route.ts, src/app/api/admin/sds/route.ts, src/app/api/admin/sds/[id]/route.ts, src/app/admin/page.tsx (11 modified files).
+- August 12 meeting notes (aug12-meeting.md) preserved untouched. Action items NOT implemented (per original instruction).
