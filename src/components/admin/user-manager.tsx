@@ -594,7 +594,11 @@ function EditUserDialog({
     setSaving(true);
     try {
       const patch: Record<string, unknown> = {
-        name: name.trim() || null,
+        // Send undefined (omitted from JSON) when name is empty so the server
+        // preserves the existing name instead of overwriting it with null.
+        // The server schema also accepts null for defense-in-depth (see
+        // updateUserSchema in /api/admin/users/[id]/route.ts).
+        ...(name.trim() ? { name: name.trim() } : {}),
         role,
         disabled,
         passwordChangeRequired: requirePwChange,

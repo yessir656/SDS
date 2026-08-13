@@ -15,6 +15,7 @@ export async function GET() {
   const chemicals = await db.chemical.findMany({
     where: { deletedAt: null },
     orderBy: { chemicalName: "asc" },
+    include: { sdsDocument: true },
   });
   return NextResponse.json({
     chemicals: chemicals.map(serializeChemical),

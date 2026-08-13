@@ -177,7 +177,7 @@ export function AuditLogViewer() {
                 <SelectItem value="chemical">Chemicals</SelectItem>
                 <SelectItem value="sds">SDS</SelectItem>
                 <SelectItem value="user">Users</SelectItem>
-                <SelectItem value="session">Sessions</SelectItem>
+                <SelectItem value="system">System</SelectItem>
               </SelectContent>
             </Select>
             <Select value={actionPrefix} onValueChange={setActionPrefix}>

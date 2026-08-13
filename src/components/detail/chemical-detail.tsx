@@ -349,12 +349,14 @@ export function ChemicalDetail() {
                 label="Supplier"
                 value={chemical.supplier}
               />
-              <DetailRow
-                icon={<FileText className="h-3.5 w-3.5" />}
-                label="SDS Document"
-                value={chemical.sdsDocumentId}
-                mono
-              />
+              {chemical.sdsDocumentId && (
+                <DetailRow
+                  icon={<FileText className="h-3.5 w-3.5" />}
+                  label="SDS Document"
+                  value={chemical.sdsDocumentId}
+                  mono
+                />
+              )}
             </CardContent>
           </Card>
 

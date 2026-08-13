@@ -8,9 +8,10 @@
 //   3. SDS — Upload / replace / view SDS documents
 // ============================================================================
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { signOut, useSession } from "next-auth/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   FlaskConical,
   LayoutDashboard,
@@ -18,7 +19,6 @@ import {
   FileText,
   LogOut,
   Loader2,
-  RefreshCw,
   ExternalLink,
   Users,
   ShieldCheck,
@@ -26,19 +26,7 @@ import {
   Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 import { AdminOverview } from "@/components/admin/admin-overview";
 import { ChemicalManager } from "@/components/admin/chemical-manager";
 import { SdsManager } from "@/components/admin/sds-manager";
@@ -48,9 +36,20 @@ import { SystemSettings } from "@/components/admin/system-settings";
 
 export default function AdminDashboardPage() {
   const { data: session, status } = useSession();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState("overview");
 
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+
+  // Defense-in-depth: if there's no session (e.g. middleware bypassed, or
+  // session expired client-side), redirect to the login page. Previously this
+  // fallback only rendered a static "Redirecting…" message without actually
+  // navigating, leaving the user stuck.
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.replace("/admin/login");
+    }
+  }, [status, router]);
 
   // While the session is loading, show a spinner.
   if (status === "loading") {
@@ -61,11 +60,11 @@ export default function AdminDashboardPage() {
     );
   }
 
-  // If no session, the middleware should have redirected. But as a fallback:
+  // If no session, show a spinner while the redirect effect fires.
   if (!session) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-muted-foreground">Redirecting to login…</p>
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
       </div>
     );
   }

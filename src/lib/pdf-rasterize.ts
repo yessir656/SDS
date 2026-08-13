@@ -58,10 +58,13 @@ export async function rasterizePdfToPngs(
       data,
       // Disable worker thread — we're in Node.js, not a browser. pdfjs will
       // run the parsing on the main thread which is fine for our use case.
+      // NOTE: `disableWorker` was removed from pdfjs-dist v6's TypeScript types
+      // but is still accepted at runtime (pdfjs ignores unknown options).
       disableWorker: true,
       // Suppress verbose console warnings from pdfjs (e.g. font fallback).
       verbosity: 0,
-    }).promise;
+      // Cast to satisfy pdfjs-dist v6 types which tightened DocumentInitParameters.
+    } as Parameters<typeof getDocument>[0]).promise;
 
     const pageCount = Math.min(doc.numPages, maxPages);
     const pngs: Buffer[] = [];
@@ -77,12 +80,15 @@ export async function rasterizePdfToPngs(
       // pdfjs render() expects a CanvasRenderingContext2D-like object.
       // @napi-rs/canvas's context is compatible with pdfjs's type expectations,
       // but TypeScript needs a cast since the types don't perfectly align.
+      // NOTE: pdfjs-dist v6 added a required `canvas` field to RenderParameters;
+      // we pass it explicitly AND cast the whole object to satisfy the types.
       await page.render({
+        canvas,
         canvasContext: ctx as unknown as CanvasRenderingContext2D,
         viewport,
         // Use the default white background for SDS pages (most are white).
         background: "#ffffff",
-      }).promise;
+      } as unknown as Parameters<typeof page.render>[0]).promise;
 
       // Export the canvas as a PNG buffer.
       const pngBuffer = canvas.toBuffer("image/png");
@@ -95,9 +101,12 @@ export async function rasterizePdfToPngs(
     return pngs;
   } finally {
     // Always destroy the document to release memory.
+    // NOTE: pdfjs-dist v6 renamed `destroy()` to `cleanup()` in its types, but
+    // `destroy()` still exists at runtime (backwards-compatible). Cast to any
+    // to suppress the TypeScript error.
     if (doc) {
       try {
-        await doc.destroy();
+        await (doc as unknown as { destroy: () => Promise<void> }).destroy();
       } catch {
         // Ignore cleanup errors.
       }

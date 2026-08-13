@@ -82,6 +82,7 @@ export async function PUT(
   const updated = await db.chemical.update({
     where: { id },
     data: updateData,
+    include: { sdsDocument: true },
   });
 
   const ctx = auditContext(session, request);

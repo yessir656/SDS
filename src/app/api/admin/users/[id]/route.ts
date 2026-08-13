@@ -11,7 +11,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { requireSuperAdmin } from "@/lib/session";
+import { requireSuperAdmin, invalidateUserStateCache } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { logAction, auditContext } from "@/lib/audit";
 
@@ -23,7 +23,9 @@ export const dynamic = "force-dynamic";
 
 const updateUserSchema = z
   .object({
-    name: z.string().min(1).max(120).optional(),
+    // Accept string, null (explicitly clear), or undefined (omit / no change).
+    // zod 4 rejects null on .optional() alone, so .nullable() is required.
+    name: z.string().min(1).max(120).nullable().optional(),
     role: z.enum(["ADMIN", "SUPER_ADMIN"]).optional(),
     disabled: z.boolean().optional(),
     password: z.string().min(8).max(128).optional(),
@@ -116,6 +118,7 @@ export async function PATCH(
   }
 
   const updateData: Record<string, unknown> = {};
+  // data.name can be: string (set), null (clear), or undefined (skip).
   if (data.name !== undefined) updateData.name = data.name;
   if (data.role !== undefined) updateData.role = data.role;
   if (data.disabled !== undefined) updateData.disabled = data.disabled;
@@ -152,6 +155,10 @@ export async function PATCH(
       updatedAt: true,
     },
   });
+
+  // Invalidate the stale-JWT cache so the change takes effect immediately on
+  // the target user's next request (no 60-second wait).
+  invalidateUserStateCache(id);
 
   const ctx = auditContext(session, request);
   const changes: string[] = [];
@@ -228,6 +235,9 @@ export async function DELETE(
   }
 
   await db.user.delete({ where: { id } });
+
+  // Invalidate the stale-JWT cache for the deleted user.
+  invalidateUserStateCache(id);
 
   const ctx = auditContext(session, request);
   await logAction({

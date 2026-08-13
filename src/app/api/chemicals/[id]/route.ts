@@ -9,7 +9,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const chemical = await db.chemical.findUnique({ where: { id } });
+  const chemical = await db.chemical.findUnique({
+    where: { id },
+    include: { sdsDocument: true },
+  });
 
   if (!chemical || chemical.deletedAt) {
     return NextResponse.json({ error: "Chemical not found" }, { status: 404 });

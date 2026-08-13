@@ -33,9 +33,12 @@ export async function GET(request: Request) {
   const sinceDate = Number.isFinite(since) && since > 0 ? new Date(since) : new Date(0);
 
   // Fetch changed chemicals (including soft-deleted ones).
+  // Include the sdsDocument relation so serializeChemical can populate
+  // sdsDocumentId with the real SDS cuid (not the chemical id).
   const changedChemicals = await db.chemical.findMany({
     where: { updatedAt: { gt: sinceDate } },
     orderBy: { updatedAt: "asc" },
+    include: { sdsDocument: true },
   });
 
   // Fetch changed SDS documents.

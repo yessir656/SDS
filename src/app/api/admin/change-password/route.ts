@@ -18,6 +18,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/auth";
 import { logAction, auditContext } from "@/lib/audit";
+import { invalidateUserStateCache } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,10 @@ export async function POST(request: Request) {
       passwordChangeRequired: false,
     },
   });
+
+  // Invalidate the stale-JWT cache so the cleared `passwordChangeRequired`
+  // flag is visible immediately on the user's next request.
+  invalidateUserStateCache(user.id);
 
   const ctx = auditContext(session, request);
   await logAction({

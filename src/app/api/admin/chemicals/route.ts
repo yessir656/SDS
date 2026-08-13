@@ -137,7 +137,10 @@ export async function POST(request: Request) {
 
   return NextResponse.json(
     {
-      chemical: serializeChemical(chemical.chem),
+      // Attach the freshly-created SDS as the sdsDocument relation so
+      // serializeChemical can populate sdsDocumentId with the real SDS cuid
+      // (the chem object from the transaction doesn't include the relation).
+      chemical: serializeChemical({ ...chemical.chem, sdsDocument: chemical.sds }),
       sds: serializeSds(chemical.sds),
     },
     { status: 201 }

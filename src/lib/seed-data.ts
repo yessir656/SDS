@@ -116,7 +116,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Chemical Analysis",
     safetyInstructions:
       "Keep away from heat, sparks, open flames, and hot surfaces — acetone has an extremely low flash point of −20 °C. Use only in a well-ventilated fume hood and ground all metal containers when transferring bulk quantities. Keep containers tightly closed when not in use; store away from oxidizers and strong acids.",
-    sdsDocumentId: "sds-acetone",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-06-15"),
     version: "2.1",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -165,7 +165,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Chemical Analysis",
     safetyInstructions:
       "Methanol is acutely toxic by ingestion, inhalation, and skin absorption and may cause irreversible optic nerve damage leading to blindness. Handle only inside a chemical fume hood with confirmed face velocity ≥ 100 ft/min. Keep away from ignition sources; flash point is 11 °C. Never pipette by mouth.",
-    sdsDocumentId: "sds-methanol",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-05-22"),
     version: "3.0",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -209,7 +209,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Metallography",
     safetyInstructions:
       "Ethanol is a Class IB flammable liquid (flash point 13 °C). Use in a fume hood away from heat and open flame; bond and ground metal containers during transfer. Avoid eye and prolonged skin contact. Denatured grades may contain toxic additives such as methanol or benzene — review the SDS before use.",
-    sdsDocumentId: "sds-ethanol",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-04-10"),
     version: "2.2",
     emergencyContact: MIRDC_CONTACT,
@@ -252,7 +252,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Chemical Analysis",
     safetyInstructions:
       "Hydrochloric acid releases corrosive hydrogen chloride vapor — always open and dispense inside a fume hood. Never mix with cyanides, sulfides, or formaldehyde (liberates toxic gas) or with strong oxidizers. Add acid to water, never water to acid. Store in the acid cabinet, segregated from bases and oxidizers.",
-    sdsDocumentId: "sds-hcl",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-07-01"),
     version: "4.1",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -295,7 +295,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Chemical Analysis",
     safetyInstructions:
       "Concentrated sulfuric acid is a strong oxidizer and is highly exothermic when mixed with water — always add acid slowly to water, never the reverse. Store in the acid cabinet, away from organic materials, bases, metals, and reducing agents. Wear a face shield and acid-resistant apron for any operation involving more than 500 mL.",
-    sdsDocumentId: "sds-sulfuric-acid",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-03-18"),
     version: "3.2",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -339,7 +339,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Chemical Analysis",
     safetyInstructions:
       "Nitric acid is a strong oxidizer and may ignite organic materials on contact. Store strictly in the oxidizers cabinet, separated from flammables, bases, reducing agents, and metals. Always work in a fume hood — brown nitrogen dioxide fumes are toxic. Never mix with alcohols, acetone, or organic solvents; many such mixtures are explosive.",
-    sdsDocumentId: "sds-nitric-acid",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-06-30"),
     version: "2.5",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -383,7 +383,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Corrosion Testing",
     safetyInstructions:
       "Sodium hydroxide is a strong base that causes severe burns to skin and eyes. Dissolution in water is highly exothermic — always add pellets slowly to water with stirring, never the reverse. Store in the corrosives cabinet, segregated from acids, metals, and organic halogens. Keep containers tightly closed — NaOH absorbs moisture and CO₂ from the air.",
-    sdsDocumentId: "sds-naoh",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-05-09"),
     version: "2.0",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -426,7 +426,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Chemical Analysis",
     safetyInstructions:
       "Hydrogen peroxide 30% is a strong oxidizer that can cause spontaneous ignition of organic materials. Store in the oxidizers cabinet in the original vented, light-resistant container — never transfer to a tightly sealed glass bottle (pressure buildup may rupture the container). Keep away from all metals (especially iron, copper, brass) and reducing agents. Always add to water, never water to peroxide.",
-    sdsDocumentId: "sds-h2o2",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-06-12"),
     version: "1.4",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -474,7 +474,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Metallography",
     safetyInstructions:
       "Toluene is a reproductive toxicant (suspected of damaging the unborn child) and a central nervous system depressant. Handle only inside a fume hood. Flash point is 4 °C — keep away from ignition sources. Do not use if pregnant or attempting to conceive without first consulting the safety officer. Avoid skin contact — toluene is readily absorbed through intact skin.",
-    sdsDocumentId: "sds-toluene",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-02-28"),
     version: "3.1",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -518,7 +518,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Physical Metallurgy",
     safetyInstructions:
       "Isopropyl alcohol is a Class IB flammable liquid (flash point 12 °C). Use in a fume hood and keep away from heat, sparks, and open flame. Bond and ground metal containers during bulk transfer. Avoid prolonged skin contact — IPA defats the skin and may cause dermatitis. Do not use to clean skin or as a topical antiseptic in the laboratory setting.",
-    sdsDocumentId: "sds-ipa",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-07-05"),
     version: "1.8",
     emergencyContact: MIRDC_CONTACT,
@@ -561,7 +561,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Corrosion Testing",
     safetyInstructions:
       "Glacial acetic acid (≥99%) is both a Class II combustible liquid (flash point 39 °C) and a severe corrosive. Store in the corrosives cabinet, away from oxidizers (especially nitric acid and peroxides — mixtures can be explosive), strong bases, and amines. Use in a fume hood; vapors are irritating to the respiratory tract. Always add acid to water when diluting.",
-    sdsDocumentId: "sds-acetic-acid",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-04-25"),
     version: "2.3",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -609,7 +609,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Metallography",
     safetyInstructions:
       "n-Hexane is a reproductive toxicant and causes peripheral neuropathy (numbness, weakness of hands and feet) on repeated overexposure. Handle only in a fume hood. Flash point is −22 °C — keep away from ignition sources. Do not use if pregnant or attempting to conceive without first consulting the safety officer. Avoid skin contact — n-hexane is readily absorbed through intact skin.",
-    sdsDocumentId: "sds-hexane",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-03-05"),
     version: "2.7",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -656,7 +656,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Chemical Analysis",
     safetyInstructions:
       "Dichloromethane is a suspected human carcinogen (Category 2) and is metabolized to carbon monoxide in the body — carboxyhemoglobin levels can reach dangerous concentrations after significant inhalation exposure. Handle only in a fume hood. Store in the ventilated storage cabinet, away from light and heat (decomposes to phosgene). Do not use near open flames or hot surfaces — thermal decomposition produces highly toxic phosgene gas and hydrogen chloride.",
-    sdsDocumentId: "sds-dcm",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-01-30"),
     version: "2.4",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,
@@ -704,7 +704,7 @@ export const SEED_CHEMICALS: ChemicalRecord[] = [
     department: "Physical Metallurgy",
     safetyInstructions:
       "Concentrated ammonia solution releases corrosive ammonia gas — always open and dispense inside a fume hood. Store in the corrosives cabinet, away from halogens, strong acids, and oxidizers (especially chlorine and bromine — violent reactions). Never seal a container tightly — pressure buildup from gas evolution may rupture it. Cool, ventilated storage is essential.",
-    sdsDocumentId: "sds-ammonia",
+    sdsDocumentId: "",  // placeholder — overwritten by sync with the real SDS cuid
     lastUpdated: Date.parse("2024-05-17"),
     version: "2.0",
     emergencyContact: `${MIRDC_CONTACT}; ${POISON_CONTROL}`,

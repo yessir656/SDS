@@ -23,6 +23,10 @@ export default withAuth({
 });
 
 export const config = {
-  // Protect all /admin/* routes EXCEPT /admin/login (the sign-in page itself).
-  matcher: ["/admin/((?!login).*)"],
+  // Protect /admin and all /admin/* routes EXCEPT /admin/login (the sign-in
+  // page itself). The bare `/admin` URL is matched explicitly so unauthed
+  // visitors get a server-side 307 redirect to /admin/login (previously the
+  // matcher only caught subpaths like /admin/chemicals, leaving the bare
+  // /admin URL to render a stuck "Redirecting…" page).
+  matcher: ["/admin", "/admin/((?!login).*)"],
 };

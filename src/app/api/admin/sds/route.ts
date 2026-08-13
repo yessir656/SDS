@@ -35,6 +35,60 @@ import { logAction, auditContext } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
+// ---------------------------------------------------------------------------
+// Non-POST methods — return 401 (Unauthorized) BEFORE 405 (Method Not Allowed).
+//
+// Defense-in-depth: previously, an unauthenticated GET to this route returned
+// 405 because Next.js's default handler runs before our requireAdmin() check.
+// That leaked "this route exists but only accepts POST" to unauthenticated
+// callers. Now we run the auth check first, so unauth callers get 401 and
+// authed callers get a proper 405 with an Allow header.
+// ---------------------------------------------------------------------------
+
+export async function GET(request: Request) {
+  const session = await requireAdmin();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return NextResponse.json(
+    { error: "Method not allowed" },
+    { status: 405, headers: { Allow: "POST" } }
+  );
+}
+
+export async function PUT(request: Request) {
+  const session = await requireAdmin();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return NextResponse.json(
+    { error: "Method not allowed" },
+    { status: 405, headers: { Allow: "POST" } }
+  );
+}
+
+export async function DELETE(request: Request) {
+  const session = await requireAdmin();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return NextResponse.json(
+    { error: "Method not allowed" },
+    { status: 405, headers: { Allow: "POST" } }
+  );
+}
+
+export async function PATCH(request: Request) {
+  const session = await requireAdmin();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return NextResponse.json(
+    { error: "Method not allowed" },
+    { status: 405, headers: { Allow: "POST" } }
+  );
+}
+
 export async function POST(request: Request) {
   const session = await requireAdmin();
   if (!session) {

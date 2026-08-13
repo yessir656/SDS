@@ -5,7 +5,10 @@
 //   - Storage keys are server-generated UUIDs (never user-supplied filenames).
 //   - Path traversal is prevented by rejecting keys containing "/" or "..".
 //   - Files live OUTSIDE the public/ directory — never directly URL-accessible.
-//   - Downloads are gated through an authenticated API route.
+//   - Downloads are gated through an explicit API route that validates the SDS
+//     id — files are never served directly from public/. The download route is
+//     intentionally public (the PWA needs unauthenticated access to SDS PDFs),
+//     but the storage path itself is never exposed.
 // ============================================================================
 
 import { promises as fs } from "fs";

@@ -48,7 +48,9 @@ export interface ClientSdsDocument {
   updatedAt: number;
 }
 
-export function serializeChemical(c: Chemical): ClientChemical {
+export function serializeChemical(
+  c: Chemical & { sdsDocument?: SdsDocument | null }
+): ClientChemical {
   return {
     id: c.id,
     casNumber: c.casNumber,
@@ -70,7 +72,13 @@ export function serializeChemical(c: Chemical): ClientChemical {
     firstAidMeasures: c.firstAidMeasures,
     firefightingMeasures: c.firefightingMeasures,
     accidentalReleaseMeasures: c.accidentalReleaseMeasures,
-    sdsDocumentId: c.id, // 1:1 — SDS id matches chemical id for client convenience
+    // Use the REAL SDS document id from the Prisma relation (callers must
+    // `include: { sdsDocument: true }`). Falls back to "" if the relation
+    // wasn't loaded or the chemical has no SDS yet. Previously this was set
+    // to `c.id` (the chemical id), which was misleading — the detail view
+    // displayed the chemical id under a "SDS Document" label, and direct
+    // fetches to /api/sds/<chemical-id>/download returned 404.
+    sdsDocumentId: c.sdsDocument?.id ?? "",
     lastUpdated: c.updatedAt.getTime(),
     serverVersion: c.serverVersion,
     deletedAt: c.deletedAt ? c.deletedAt.getTime() : null,
