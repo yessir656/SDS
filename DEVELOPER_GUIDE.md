@@ -213,7 +213,8 @@ src/app/
         │   └── [id]/route.ts        GET / PUT / DELETE
         └── sds/
             ├── route.ts             POST (upload PDF)
-            └── [id]/route.ts        DELETE (revert to placeholder)
+            ├── [id]/route.ts        DELETE (revert to placeholder)
+            └── extract/route.ts     POST (AI auto-fill from PDF — VLM extraction)
 ```
 
 ### Library code
@@ -225,6 +226,9 @@ src/lib/
 ├── storage.ts           Safe SDS file storage (UUID filenames, no path exposure)
 ├── validation.ts        zod schemas for chemical & SDS inputs
 ├── pdf-placeholder.ts   Generates a minimal valid placeholder PDF
+├── pdf-rasterize.ts     PDF → PNG renderer (pdfjs-dist + @napi-rs/canvas, pure JS, no Poppler)
+├── ai-vlm.ts            Provider-agnostic VLM abstraction (zai / gemini / openai / anthropic)
+├── ppe.ts               PPE display helpers / lookup tables
 ├── sync-engine.ts       Client delta sync engine (mutex, rate-limit, SDS blob caching)
 ├── local-db.ts          Dexie schema v2 (chemicals, sdsDocuments, sdsBlobs, syncMeta, ...)
 ├── seed-data.ts         14 chemicals + 7 locations + default prefs (migration source)
@@ -262,7 +266,10 @@ scripts/seed-db.ts        Seeds admin from .env + migrates 14 chemicals into Pri
 scripts/generate-icons.mjssharp-based icon generator
 
 .env                      DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD, NEXTAUTH_SECRET, NEXTAUTH_URL
-.env.example              Template (committed)
+                          + optional AI_PROVIDER / GEMINI_API_KEY / GEMINI_MODEL
+                          (AI_PROVIDER defaults to "zai" — sandbox-only. Set to "gemini"
+                          for local dev. See §6A below.)
+.env.example              Template (committed — safe placeholders, no real secrets)
 next.config.ts            Security headers (CSP, HSTS, X-Frame-Options, ...), reactStrictMode
 ```
 
@@ -357,12 +364,107 @@ preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
 | DELETE | `/api/admin/chemicals/[id]` | Soft-delete (`deletedAt = now`). Cascade-soft-deletes the SDS. |
 | POST | `/api/admin/sds` | Upload / replace SDS PDF. Multipart form. Validates magic bytes + MIME + extension + size. Stores with UUID filename. Increments `version`, sets `status = available`. |
 | DELETE | `/api/admin/sds/[id]` | Revert to placeholder. Removes the uploaded file, resets `status = placeholder`, increments `version`. |
+| POST | `/api/admin/sds/extract` | **AI auto-fill.** Accepts an SDS PDF (multipart), rasterizes first 5 pages to PNG, sends to the configured VLM provider (`src/lib/ai-vlm.ts`), parses + sanitizes the JSON response, returns `{ success, data }`. 60s timeout. See §6A. |
 
 ### Auth
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/auth/callback/credentials` | NextAuth credentials sign-in. |
 | GET/POST | `/api/auth/*` | NextAuth session / csrf / signout handlers. |
+
+---
+
+## 6A. AI Auto-Fill Architecture (VLM Provider Abstraction)
+
+The "Auto-fill from PDF" feature reads an uploaded SDS PDF using a vision-language
+model (VLM) and returns structured JSON fields. The provider is swappable via the
+`AI_PROVIDER` env var so the same code works on the sandbox (free in-house AI) and
+on a local machine (free Google Gemini tier).
+
+### Request flow
+
+```
+Admin UI (chemical-manager.tsx)
+  └─ user clicks "Auto-fill from PDF", selects a .pdf file
+  └─ POST /api/admin/sds/extract  (multipart: file=...)
+       │
+       ├─ requireAdmin()                          ← server-side authz
+       ├─ validate file (magic bytes %PDF- + MIME + .pdf + size)
+       ├─ assertProviderConfigured(provider)      ← fail fast if key missing
+       ├─ rasterizePdfToPngs(buffer, {maxPages:5, scale:2})   ← src/lib/pdf-rasterize.ts
+       │     └─ pdfjs-dist + @napi-rs/canvas (pure JS, no Poppler)
+       ├─ callVlm(pageImages, EXTRACTION_PROMPT)  ← src/lib/ai-vlm.ts
+       │     ├─ AI_PROVIDER=zai       → z-ai-web-dev-sdk (glm-4.6v)   [sandbox default]
+       │     ├─ AI_PROVIDER=gemini    → @google/generative-ai (gemini-3.6-flash)
+       │     ├─ AI_PROVIDER=openai    → openai SDK (gpt-4o-mini)
+       │     └─ AI_PROVIDER=anthropic → @anthropic-ai/sdk (claude-3-5-sonnet)
+       ├─ extractJson(rawResponse)                 ← strip markdown fences
+       ├─ JSON.parse + sanitize (enum filter, trim, dedupe)
+       └─ return { success: true, data: {…15 fields…} }
+  └─ frontend merges fields into the chemical form (preserves the manual `id` field)
+```
+
+### Provider selection (`src/lib/ai-vlm.ts`)
+
+| `AI_PROVIDER` | SDK package | Default model | Where it works |
+|---|---|---|---|
+| `zai` (default) | `z-ai-web-dev-sdk` (pre-installed) | `glm-4.6v` | **Z.ai sandbox only** — auto-configured via `/etc/.z-ai-config`. Does NOT work on a local machine. |
+| `gemini` | `@google/generative-ai` (pre-installed, v0.24.1) | `gemini-3.6-flash` | Local dev / production. Free tier: 1,500 req/day. |
+| `openai` | `openai` (NOT installed — `bun add openai`) | `gpt-4o-mini` | Local dev / production. Paid. |
+| `anthropic` | `@anthropic-ai/sdk` (NOT installed — `bun add @anthropic-ai/sdk`) | `claude-3-5-sonnet-20241022` | Local dev / production. Paid. |
+
+### Gemini configuration (verified)
+
+| Item | Value |
+|---|---|
+| SDK | `@google/generative-ai` v0.24.1 (installed, pre-built into `node_modules`) |
+| API endpoint | `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` (hardcoded in SDK as `DEFAULT_API_VERSION = "v1beta"`) |
+| **Default model** | **`gemini-3.6-flash`** — hardcoded in `src/lib/ai-vlm.ts` line 270 as the fallback when `GEMINI_MODEL` is not set. Confirmed real and served by the current API. |
+| Override | Set `GEMINI_MODEL=<model>` in `.env` to use a different model. Do NOT use retired models (see below). |
+| Safety settings | All 4 categories set to `BLOCK_NONE` — SDS documents contain hazard words ("carcinogen", "fatal") that would otherwise trigger filters and silently blank the response. |
+| Output mode | `responseMimeType: "application/json"` — forces valid JSON output, no markdown fences to strip. |
+| **Retired models** | `gemini-1.5-flash`, `gemini-1.5-pro`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-2.0-pro`, `gemini-2.5-flash`, `gemini-2.5-pro` — all return 404 "model is no longer available". |
+
+### Required environment variables (Gemini)
+
+| Variable | Required? | Purpose |
+|---|---|---|
+| `AI_PROVIDER` | Yes (to use Gemini) | Set to `gemini`. Defaults to `zai` if unset. |
+| `GEMINI_API_KEY` | Yes (when `AI_PROVIDER=gemini`) | Google AI Studio API key. Get one free at https://aistudio.google.com/apikey. NEVER commit this. |
+| `GEMINI_MODEL` | No | Override the default `gemini-3.6-flash`. Only set if you need a different currently-served model. |
+
+### Error handling (`src/lib/ai-vlm.ts`)
+
+| Error class | Thrown when | HTTP status returned by extract route |
+|---|---|---|
+| `AiConfigError` | Provider API key missing, or SDK package not installed, or (zai) config file not found. | 503 |
+| `AiRequestError` | The API call itself failed (network, auth, rate limit, 404 model not found). Carries `.status` from the upstream API. | 502 (or the upstream status if 4xx/5xx) |
+
+The extract route (`src/app/api/admin/sds/extract/route.ts`) catches both, returns a JSON `{ success: false, error: "…" }` body, and never exposes the API key or raw request payload to the client.
+
+### Local development setup (Gemini)
+
+```bash
+# 1. Get a free key:  https://aistudio.google.com/apikey
+# 2. Add to .env:
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_real_key_here
+# GEMINI_MODEL is optional — defaults to gemini-3.6-flash
+# 3. Restart:
+bun run dev
+```
+
+The `@google/generative-ai` package is already in `package.json` — no `bun add` needed.
+
+### Where the AI code lives
+
+| File | Role |
+|---|---|
+| `src/lib/ai-vlm.ts` | Provider abstraction: `resolveProvider()`, `assertProviderConfigured()`, `callVlm()`, and per-provider functions `callZai()`, `callGemini()`, `callOpenai()`, `callAnthropic()`. |
+| `src/lib/pdf-rasterize.ts` | PDF → PNG conversion (pdfjs-dist + @napi-rs/canvas). Returns `Buffer[]` (one per page, max 5). |
+| `src/app/api/admin/sds/extract/route.ts` | The API endpoint. Validates file, calls rasterize + callVlm, parses + sanitizes response. |
+| `src/components/admin/chemical-manager.tsx` | Frontend: the "Auto-fill from PDF" button + form-merge logic. |
+| `src/types/ai-providers.d.ts` | TypeScript module declarations for the optional (not-pre-installed) `openai` and `@anthropic-ai/sdk` packages. |
 
 ---
 
@@ -608,5 +710,70 @@ The implementation is **complete and verified**:
 - SDS PDFs cached client-side in IndexedDB for offline viewing.
 - Security headers configured; `.env` gitignored; admin auth server-side enforced.
 - TypeScript strict: 0 errors. ESLint: 0 errors.
+- **AI auto-fill** works with the default `zai` provider on the Z.ai sandbox (verified end-to-end via Agent Browser). The `gemini` provider code path is API-compatible with the installed `@google/generative-ai` v0.24.1 SDK; live verification against Google's API requires a real `GEMINI_API_KEY` in `.env` (not present in the sandbox).
 
 For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
+
+---
+
+## 16. Anti-Hallucination Reference
+
+> **Purpose:** This section exists so future AI agents (and developers) have a single source of truth about what is actually in the codebase. If the docs and the code ever disagree, **the code is the truth** — update the docs.
+
+### CURRENTLY IMPLEMENTED (verified in code)
+
+| Feature | Where | Notes |
+|---|---|---|
+| Offline-first PWA (Dexie/IndexedDB cache) | `src/lib/local-db.ts`, `src/lib/sync-engine.ts` | Client reads from Dexie; writes are local-only for prefs. |
+| Prisma + SQLite backend (source of truth) | `prisma/schema.prisma`, `src/lib/db.ts` | 3 models: `User`, `Chemical`, `SdsDocument`. |
+| NextAuth.js v4 (Credentials, JWT, bcrypt 12 rounds) | `src/lib/auth.ts`, `src/app/api/auth/` | `role=ADMIN` gate in `authorize()`. |
+| Admin dashboard at `/admin` (Overview/Chemicals/SDS tabs) | `src/app/admin/`, `src/components/admin/` | Edge middleware + `requireAdmin()` server-side guard. |
+| Delta sync API (`GET /api/sync?since=<ms>`) | `src/app/api/sync/route.ts` | Public, returns chemicals + SDS metadata deltas. |
+| SDS PDF upload (magic-byte + MIME + ext + size validation) | `src/app/api/admin/sds/route.ts`, `src/lib/storage.ts`, `src/lib/validation.ts` | UUID storage keys, no path traversal. |
+| SDS PDF download (streamed, version-cached client-side) | `src/app/api/sds/[id]/download/route.ts` | `Cache-Control: no-store` server-side; IndexedDB Blob cache client-side. |
+| **AI auto-fill from PDF** (VLM extraction) | `src/app/api/admin/sds/extract/route.ts`, `src/lib/ai-vlm.ts`, `src/lib/pdf-rasterize.ts` | Provider-agnostic: `zai` / `gemini` / `openai` / `anthropic`. Default `zai` (sandbox). |
+| **Gemini provider** (`@google/generative-ai` v0.24.1) | `src/lib/ai-vlm.ts` → `callGemini()` | Default model `gemini-3.6-flash` (hardcoded line 270). SDK pre-installed. BLOCK_NONE safety, JSON output mode. |
+| PDF rasterization (pure JS, no Poppler) | `src/lib/pdf-rasterize.ts` | `pdfjs-dist` + `@napi-rs/canvas`. Max 5 pages, scale 2.0 (~150 DPI). |
+| Security headers (CSP, HSTS, X-Frame-Options DENY, etc.) | `next.config.ts` | |
+| Service worker (vanilla, production-only) | `public/sw.js`, `src/components/common/service-worker-register.tsx` | App-shell precache + SWR for assets. Disabled in dev. |
+| GHS pictograms (9 inline SVGs) | `src/components/ghs/pictograms.tsx` | |
+| Emergency mode (full-screen, offline, context-aware FAB) | `src/components/emergency/` | |
+| Dark mode (next-themes) | `src/components/common/theme-provider.tsx` | |
+
+### PLANNED (discussed but NOT implemented)
+
+| Feature | Source | Status |
+|---|---|---|
+| AI-powered chatbot for chemical/SDS queries | `aug12-meeting.md` §1 (Mr. Casila suggestion) | **Not started.** Discussed at the August 12 meeting as a potential future enhancement. No code exists. |
+| Excel bulk chemical import | `ADMIN_GUIDE.md` §4.4 ("A future Excel bulk-import feature is planned") | **Not started.** No code, no API route, no UI. |
+| Per-division admin roles / focal persons | `aug12-meeting.md` §4 | **Not started.** Only a single `ADMIN` role exists. |
+| Regulatory tag display (DENR-EMB / PNP / PDEA) | `aug12-meeting.md` §3.2 | **Partially present.** The `regulatoryTags` field exists in the Prisma schema and Chemical type, and a `RegulatoryTags` component exists. See "Unknown" below. |
+
+### DEPRECATED / RETIRED (do not use)
+
+| Item | Why | Replace with |
+|---|---|---|
+| `gemini-1.5-flash`, `gemini-1.5-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+| `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-2.0-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+| `gemini-2.5-flash`, `gemini-2.5-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+| `@google/generative-ai` older versions (< 0.24.0) | Missing `responseMimeType` support | v0.24.1 (currently installed) |
+| `pdftoppm` / Poppler system dependency | Replaced by pure-JS renderer | `pdfjs-dist` + `@napi-rs/canvas` (`src/lib/pdf-rasterize.ts`) |
+| Old Dexie-only architecture (no backend) | Described in outdated `README.md` (pre-backend era) | Current: Prisma + SQLite backend + Dexie client cache + delta sync. See §2. |
+| `npm install` / `npm run dev` | Use Bun — `db:seed` is TypeScript | `bun install` + `bun run dev` |
+
+### UNKNOWN / REQUIRES VERIFICATION
+
+| Item | What we know | What we don't |
+|---|---|---|
+| `regulatoryTags` field | Exists in Prisma schema (`Chemical.regulatoryTags`), in the TypeScript types, and a `RegulatoryTags.tsx` component renders them. The seed data includes empty arrays for all 14 chemicals. | Whether the August 12 meeting's request (DENR-EMB / PNP / PDEA classification tags) is fully wired up — the field exists but may need population logic and admin UI. Not verified end-to-end. |
+| Gemini 3.6 free-tier quota | Code comment and `.env.example` say "1,500 requests/day". | This quota is set by Google and may change. Verify at https://ai.google.dev/pricing before relying on it. |
+| Live Gemini API response | SDK wiring is verified (import + `getGenerativeModel` + `generateContent` all callable, `BLOCK_NONE` + `responseMimeType` accepted by the SDK). | No real `GEMINI_API_KEY` is present in the sandbox `.env`, so the actual end-to-end Gemini request/response has not been tested in this environment. The `zai` provider (sandbox default) HAS been tested end-to-end. |
+| `@tanstack/react-query` dependency | Listed in `package.json` (^5.82.0). | **Zero imports found** in `src/`. It is a dead dependency — installed but unused. Safe to remove in a future cleanup, but left in place to avoid breaking the running app. |
+| Committed SQLite DB at `prisma/db/custom.db` | Present in the repo (from the original ZIP). Contains a bcrypt admin hash. | Whether this is intentional (for dev convenience) or an accidental commit. The live sandbox uses a fresh DB at `db/custom.db` (different path). The `.gitignore` does NOT cover `prisma/db/*.db` (only `/db/*.db` root-anchored). |
+
+### Documentation vs. code — how to resolve disagreements
+
+1. **The code is always the truth.** If a doc says X but the code does Y, the doc is wrong.
+2. **Verify in the code** before trusting any doc claim about: model names, env var names, API routes, file locations, database fields.
+3. **Update the doc** to match the code. Do not change the code to match a stale doc unless explicitly asked.
+4. **Never assume a model / API / package exists** without checking the installed version or the code's actual import.

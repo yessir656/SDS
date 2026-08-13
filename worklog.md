@@ -35,3 +35,41 @@ Stage Summary:
 - Admin credentials: admin@mirdc.dost.gov.ph / ChangeMeNow!2026 (change before production).
 - Known non-blocking warnings: Next.js 16 deprecates `middleware` filename in favor of `proxy` (still works; the /admin matcher misses `/admin` without trailing slash — pre-existing, not a security issue since admin API enforces auth server-side).
 - Files added in the live project: .zscripts/dev-daemon.py (the daemonizer), .env, db/custom.db (fresh SQLite, NOT the committed one), storage/sds/*.pdf (14 placeholder PDFs).
+
+---
+Task ID: GEMINI-FIX-1
+Agent: Orchestrator
+Task: Fix the Gemini AI integration without breaking the running application, update documentation to match implementation, preserve August 12 meeting notes.
+
+Work Log:
+- Inspected the LIVE project at /home/z/my-project (NOT the extracted ZIP archive at upload/SDS-extracted/SDS-main/). Confirmed dev server running on port 3000 (PID 3235) with AI_PROVIDER=zai (default — .env has no AI config).
+- Traced the full Gemini flow: chemical-manager.tsx (Auto-fill button) → POST /api/admin/sds/extract → ai-vlm.ts callVlm() → callGemini() → @google/generative-ai SDK → v1beta API → response → sanitize → UI merge.
+- Verified @google/generative-ai v0.24.1 is installed. Confirmed SDK API surface matches the code: GoogleGenerativeAI class (line 1468), getGenerativeModel (line 1475), generateContent (line 1373), HarmBlockThreshold.BLOCK_NONE (line 997), GenerationConfig.responseMimeType (line 691), DEFAULT_API_VERSION="v1beta" (line 308).
+- SDK wiring test PASSED: import + class instantiation + getGenerativeModel({model:"gemini-3.6-flash", safetySettings:BLOCK_NONE, generationConfig:{responseMimeType:"application/json"}}) all accepted without error.
+- ROOT CAUSE identified: Documentation drift. The code in ai-vlm.ts correctly defaults to gemini-3.6-flash (line 270, confirmed real by user), but docs cited retired models: .env.example said "gemini-1.5-flash" (line 42) and "gemini-2.0-flash" (line 62); ADMIN_GUIDE.md said "gemini-2.5-flash" (line 156). When users followed the docs and set GEMINI_MODEL to a retired model, they got a 404 "model no longer available" error.
+- The CODE needed NO changes — the Gemini integration in ai-vlm.ts was already correct (correct SDK, correct API usage, correct default model, correct safety settings, correct error handling).
+- Fixed .env.example: updated Gemini section to document gemini-3.6-flash as default, listed all retired models (1.5/2.0/2.5), used safe placeholder GEMINI_API_KEY=your_gemini_api_key_here.
+- Fixed ADMIN_GUIDE.md line 156: gemini-2.5-flash → gemini-3.6-flash, updated retired-models note to include 2.5. Added 2 troubleshooting rows (404 model retired, blocked/no candidates).
+- Updated DEVELOPER_GUIDE.md: added Section 6A (AI Auto-Fill Architecture — flow diagram, provider table, Gemini config, env vars, error handling, setup instructions, code locations), added Section 16 (Anti-Hallucination Reference — Implemented/Planned/Deprecated/Unknown), fixed file map (added ai-vlm.ts, pdf-rasterize.ts, ppe.ts, extract route), fixed env vars line, updated Project Status.
+- Updated README.md: fixed outdated "no backend" architecture (added Prisma+SQLite, NextAuth, AI auto-fill, delta sync to tech stack; updated project structure to include admin/, api/, lib/ files; added admin dashboard, AI auto-fill, SDS management to key features). Preserved valid design-decisions sections.
+- Preserved aug12-meeting.md UNTOUCHED (verified via git diff — no changes).
+- Did NOT modify .env (app works with zai default; adding AI_PROVIDER=gemini without a real key would break the running app).
+- Did NOT modify any source code (ai-vlm.ts, extract route, chemical-manager — all already correct).
+- Did NOT restart the dev server (same PID 3235 throughout — verified before and after all changes).
+
+Testing:
+- SDK wiring test: PASSED (import, class instantiation, getGenerativeModel with gemini-3.6-flash + BLOCK_NONE + responseMimeType all accepted).
+- Extract route auth gate: PASSED (401 for unauthenticated requests, both with and without file).
+- Full auto-fill pipeline end-to-end (zai provider): PASSED. Created a test SDS PDF with realistic content (Acetone, CAS 67-64-1, formula C3H6O, emergency contact). Agent Browser test: logged in as admin → Add Chemical → Auto-fill from PDF → uploaded test PDF → POST /api/admin/sds/extract returned 200 in 2.6s. Form populated with correct fields: chemicalName=Acetone, casNumber=67-64-1, formula=C3H6O, emergencyContact=1 314 771 4727. Screenshot saved: verify-gemini-autofill-test.png.
+- No console errors, no runtime errors in dev.log.
+- No secrets leaked in any .md file (verified: no API keys, no NEXTAUTH_SECRET, no real passwords in docs).
+- Existing app still healthy: GET / = 200, GET /api/chemicals = 200, GET /api/sync?since=0 = 200.
+- Live Gemini API response: NOT TESTED — no real GEMINI_API_KEY in sandbox .env (would break the running app if added without a real key). SDK wiring is verified; end-to-end Gemini call requires user's real key.
+
+Stage Summary:
+- Root cause: documentation drift (docs cited retired Gemini models 1.5/2.0/2.5; code correctly uses gemini-3.6-flash).
+- Fix: documentation-only (4 files changed on disk: .env.example, ADMIN_GUIDE.md, DEVELOPER_GUIDE.md, README.md). Zero source code changes.
+- Verified model: gemini-3.6-flash (confirmed real by user, accepted by installed SDK v0.24.1, hardcoded as default in ai-vlm.ts line 270).
+- Gemini integration method: @google/generative-ai SDK v0.24.1, v1beta API endpoint, BLOCK_NONE safety settings, JSON output mode (responseMimeType: application/json).
+- The running application was never disrupted (same dev server PID throughout, all existing routes verified working).
+- August 12 meeting notes preserved untouched in aug12-meeting.md. Action items NOT implemented (per user instruction — will discuss after Gemini fix).

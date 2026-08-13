@@ -153,7 +153,7 @@ The default AI provider (`zai`) only works inside the Z.ai cloud sandbox. If you
    The `@google/generative-ai` package is already installed — no need to run `bun add`.
 3. **Restart the dev server:** `bun run dev`
 
-That's it. The default model is `gemini-2.5-flash` (current generation, fast, good vision). If you need to override it, add `GEMINI_MODEL=<model>` to `.env`. Note: `gemini-2.0-flash` and `gemini-1.5-flash` have been retired by Google — using them returns a "model is no longer available" error.
+That's it. The default model is `gemini-3.6-flash` (current generation, fast, good vision). This is hardcoded in `src/lib/ai-vlm.ts` as the fallback when `GEMINI_MODEL` is not set, so you only need to set `GEMINI_MODEL` if you want to use a different model. **Do not override it with an older model** — `gemini-1.5-flash`, `gemini-2.0-flash`, and `gemini-2.5-flash` have all been retired by Google and return a "model is no longer available" (404) error.
 
 **Other providers** (if you prefer paid options):
 
@@ -211,6 +211,8 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 | "Extraction failed: Configuration file not found or invalid" | You're running on a local machine. The default `zai` provider only works on the Z.ai cloud sandbox. Set `AI_PROVIDER=gemini` + `GEMINI_API_KEY` in `.env` (see [§ 4.4 Setup for local development](#setup-for-local-development-when-not-using-the-sandbox)). |
 | "AI_PROVIDER=gemini is set but GEMINI_API_KEY is missing" | You set the provider but didn't add the API key. Get a free key at https://aistudio.google.com/apikey, set `GEMINI_API_KEY=...` in `.env`, restart `bun run dev`. |
 | "AI_PROVIDER=gemini requires the @google/generative-ai package" | SDK not installed. Run `bun add @google/generative-ai`. |
+| "Gemini request failed: ... model is no longer available" (404) | `GEMINI_MODEL` is set to a retired model (1.5 / 2.0 / 2.5). Remove the `GEMINI_MODEL` line from `.env` to use the default `gemini-3.6-flash`, or set it to a currently-served model. Restart `bun run dev`. |
+| "Gemini blocked the request" or "returned no candidates" | API key invalid, or the key's project doesn't have access to the model. Verify the key at https://aistudio.google.com/apikey and that the Generative Language API is enabled. |
 
 ---
 
