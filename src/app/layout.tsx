@@ -1,7 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { ThemeProvider } from "@/components/common/theme-provider";
+import { ServiceWorkerRegister } from "@/components/common/service-worker-register";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,25 +16,46 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Z.ai Code Scaffold - AI-Powered Development",
-  description: "Modern Next.js scaffold optimized for AI-powered development with Z.ai. Built with TypeScript, Tailwind CSS, and shadcn/ui.",
-  keywords: ["Z.ai", "Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
-  authors: [{ name: "Z.ai Team" }],
+  title: "SDS-CHEM — Safety Data Sheet Centralized System",
+  description:
+    "Centralized Safety Data Sheet (SDS) management for chemical safety at MIRDC. Works offline, no login required.",
+  keywords: [
+    "SDS",
+    "Safety Data Sheet",
+    "chemical safety",
+    "GHS",
+    "MIRDC",
+    "laboratory safety",
+    "PWA",
+  ],
+  authors: [{ name: "MIRDC" }],
+  manifest: "/manifest.json",
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon.svg", sizes: "any", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/icons/icon-192.png", sizes: "192x192" }],
   },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "SDS-CHEM",
+  },
+  applicationName: "SDS-CHEM",
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "SDS-CHEM — Safety Data Sheet System",
+    description:
+      "Centralized SDS management for chemical safety. Offline-first PWA.",
     type: "website",
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0d9488",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
@@ -45,8 +68,16 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        {children}
-        <Toaster />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster />
+        </ThemeProvider>
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

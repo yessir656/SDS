@@ -40,7 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-local-*
 .claude
 .z-ai-config
 *.log
@@ -52,3 +51,10 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# SDS file storage (never commit uploaded PDFs)
+/storage/
+
+# SQLite database file
+/db/*.db
+/db/*.db-journal

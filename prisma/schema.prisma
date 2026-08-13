@@ -1,8 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// ============================================================================
+// SDS-CHEM — Prisma Schema
+// Backend source-of-truth database for chemicals, SDS documents, and admin users.
+// ============================================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -13,20 +12,95 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------------------------------------------------------------------------
+// Users (admin accounts only — the public PWA has no user accounts)
+// ---------------------------------------------------------------------------
+
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         String   @default("USER") // "ADMIN" | "USER"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  uploadedSds  SdsDocument[]
+  updatedChemicals Chemical[]
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ---------------------------------------------------------------------------
+// Chemicals — the central catalog entity
+// ---------------------------------------------------------------------------
+
+model Chemical {
+  id            String   @id
+  casNumber     String
+  chemicalName  String
+  formula       String
+  tradeName     String?
+  manufacturer  String   @default("")
+  supplier      String   @default("")
+
+  signalWord    String   // "danger" | "warning"
+  hazardClasses String   // JSON-encoded array of HazardClass
+  ghsPictograms String   // JSON-encoded array of GhsPictogram
+
+  storageLocation     String  @default("")
+  department          String  @default("")
+  safetyInstructions  String  @default("")
+
+  // Regulatory classification tags (DENR-EMB, PDEA, PNP, FDA, ...). JSON-encoded
+  // string[] — only populated for chemicals subject to the relevant agency.
+  regulatoryTags       String @default("[]")
+
+  version         String  @default("1.0")
+  emergencyContact String @default("")
+  personalProtectiveEquipment String @default("[]") // JSON array
+
+  firstAidMeasures             String @default("")
+  firefightingMeasures         String @default("")
+  accidentalReleaseMeasures    String @default("")
+
+  // Server-managed sync / audit fields
+  serverVersion Int       @default(1) // incremented on every update (sync key)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime? // soft-delete (sync propagates deletes)
+  updatedById   String?
+  updatedBy     User?     @relation(fields: [updatedById], references: [id])
+
+  sdsDocument   SdsDocument?
+
+  @@index([updatedAt])
+  @@index([deletedAt])
+  @@index([chemicalName])
+  @@index([casNumber])
+}
+
+// ---------------------------------------------------------------------------
+// SDS Documents — one per chemical (1:1)
+// ---------------------------------------------------------------------------
+
+model SdsDocument {
+  id             String   @id @default(cuid())
+  chemicalId     String   @unique
+  chemical       Chemical @relation(fields: [chemicalId], references: [id], onDelete: Cascade)
+
+  storageKey     String   // safe generated filename (UUID.pdf) — never user-supplied
+  originalFileName String @default("placeholder.pdf")
+  fileSize       Int      @default(0)
+  mimeType       String   @default("application/pdf")
+  contentHash    String   @default("") // sha256 of file content
+  status         String   @default("placeholder") // "placeholder" | "available"
+  version        Int      @default(1) // incremented on each replace
+
+  uploadedById   String?
+  uploader       User?    @relation(fields: [uploadedById], references: [id])
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([updatedAt])
+  @@index([status])
 }
