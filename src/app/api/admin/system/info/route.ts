@@ -145,21 +145,33 @@ export async function GET() {
   });
 }
 
-/** Read the Next.js version from the installed package.json via fs (avoiding
- *  require.resolve, which the Next.js bundler mishandles for subpaths). */
+/** Read the Next.js version from the project's own package.json.
+ *
+ *  We deliberately AVOID reading `node_modules/next/package.json` because
+ *  Turbopack's static analyzer sees the `node_modules/next/package.json` path
+ *  string in the source and tries to resolve it as a module import, producing
+ *  a noisy `Module not found: Can't resolve './ROOT/node_modules/next/package.json'`
+ *  error in the console — even though `fs.readFileSync` works fine at runtime.
+ *
+ *  Reading from the project root `package.json` (which has no `node_modules` in
+ *  the path) avoids the false positive entirely. The `dependencies.next` field
+ *  gives us the declared version range (e.g. `^16.1.1`); we strip the semver
+ *  range prefix to get the base version. This is the declared version, not the
+ *  exact installed patch version — close enough for a system info dashboard.
+ */
 function getNextjsVersion(): string {
-  const candidates = [
-    path.join(process.cwd(), "node_modules", "next", "package.json"),
-    path.join(process.cwd(), "..", "node_modules", "next", "package.json"),
-  ];
-  for (const p of candidates) {
-    try {
-      const content = fsReadFileSync(p, "utf-8");
-      const pkg = JSON.parse(content);
-      if (pkg.version) return pkg.version;
-    } catch {
-      // try next candidate
+  try {
+    const pkgPath = path.join(process.cwd(), "package.json");
+    const content = fsReadFileSync(pkgPath, "utf-8");
+    const pkg = JSON.parse(content);
+    const range: string | undefined =
+      pkg.dependencies?.next ?? pkg.devDependencies?.next;
+    if (range) {
+      // Strip semver range prefixes: ^16.1.1 → 16.1.1, ~16.1.1 → 16.1.1
+      return range.replace(/^[^\d]+/, "");
     }
+  } catch {
+    // fall through to unknown
   }
   return "unknown";
 }

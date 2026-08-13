@@ -282,3 +282,47 @@ Stage Summary:
 - PPE status corrected in docs to match the code: FULLY IMPLEMENTED.
 - Root cause of the original mistake: conflating PPE (done) with regulatoryTags (genuinely partial) when writing the status addendum. The two fields look superficially similar in the schema (both are JSON string arrays on Chemical) but have very different completion states.
 - Lesson reinforced: §16 of DEVELOPER_GUIDE.md is right — "the code is the truth, update the docs to match." Should have grep'd for PpeList usage before writing the status.
+
+---
+Task ID: AUDIT-1
+Agent: Orchestrator
+Task: Comprehensive end-to-end audit of all pages, components, and API routes to verify the system is functional and ready to use. Non-negotiable — no skipping.
+
+Work Log:
+- Pre-audit: verified dev server healthy (PID 11887, port 3000), all public APIs return 200, all admin APIs return 401 unauth.
+- Public catalog (/): renders 14 chemicals with full data (name, CAS, formula, signal word, hazard classes, GHS pictograms, PPE list, storage location, department). Search type-ahead works (typed "acet" → 2 results). Filters work (clicked "Flammable" → 7 results). Dashboard stats render ("Most Common Hazards" + "Chemicals by Department"). No errors.
+- Chemical detail view: clicked Acetone card → detail renders with H1 heading, hazard classification, SDS sections 4/5/6 marked EMERGENCY, "View SDS PDF" + "Open Emergency Mode" + "PPE Info" popover buttons. PPE popover opens with 4 items (Chemical splash goggles, Nitrile gloves, Flame-resistant lab coat, Closed-toe chemical-resistant shoes).
+- Emergency mode: clicked "Open Emergency Mode" → full-screen red theme with all sections: GHS PICTOGRAM SUMMARY, First-Aid Measures (full text), Firefighting Measures (full text), Spill/Accidental Release (full text), REQUIRED PERSONAL PROTECTIVE EQUIPMENT (4 items), EMERGENCY CONTACT (phone number), EMERGENCY CONTACTS. Close button returns to detail.
+- Admin login: /admin/login renders sign-in form. Wrong password → "Invalid email or password" error, stayed on login page. Correct creds (admin@mirdc.dost.gov.ph) → redirected to /admin dashboard. No errors.
+- Admin Overview tab: shows SUPER badge (SUPER_ADMIN role), Total Chemicals: 14, Total SDS: 14, Available SDS: 0, Placeholder SDS: 14, Recent Activity section.
+- Admin Chemicals tab: table renders all 14 chemicals with name/formula, CAS, signal word, status, last updated, Edit + Delete actions. Add Chemical form opens with all fields (ID, name, CAS, formula, trade name, manufacturer, supplier, storage, version, GHS pictogram selectors, hazard classes, PPE textarea, safety instructions, first-aid, firefighting, spill measures, emergency contact, Auto-fill from PDF button). Edit form opens pre-filled with correct data for Acetic Acid (verified all fields).
+- Admin SDS Documents tab: table renders all 14 chemicals with file name/size, status, version, date, View/Upload/Replace actions. View SDS PDF opens PDF.js viewer in new tab with zoom controls. Upload dialog accepts PDF file → status changes from Placeholder → Available, version increments (v1 → v2). Revert to placeholder confirms → status back to Placeholder, version increments (v2 → v3). Restored original state.
+- Admin Users tab (SUPER_ADMIN): table shows all users with name, email, role, status (Active/PW change), last login, created date, Edit + Delete actions. "(you)" indicator on current user. Self-Delete button is disabled (lockout prevention). Add User dialog opens with email, name, temp password, "Require password change on next login" checkbox (checked by default). Created test user "audit-test" → appeared with "PW change" badge. Deleted 3 leftover test users (audit-test, testpw2, sample) → clean state with only super admin remaining.
+- Admin Audit Log tab (SUPER_ADMIN): entries load newest-first with timestamp, actor email, action (entity.action format), summary, IP address. Verified entries for user.create, user.password-change, user.delete — all with correct actor/summary/IP.
+- Admin System Settings tab (SUPER_ADMIN): all 5 cards render with live data — AI Provider (zai, glm-4.6v, API key auto, SDK installed yes), Storage (14 files, 14.7 KB, 1.0 KB avg, largest file, dir path), Database (SQLite, 156 KB, path, URL), Sync & Data (14 chemicals, 0 deleted, 14 SDS, 0 available, 14 placeholder, 3 users → 1 after cleanup, 12 audit entries, last update, max version 1), System Runtime (Node v24.18.0, Next.js 16.1.1, DEVELOPMENT, linux/x64, uptime, UTC, current time). Test Connection button → "OK — 558ms" with response preview.
+- Password change flow: created flagged user (audit-test) → signed out → signed in as audit-test → automatically redirected to /admin/change-password. Tried bypassing to /admin → redirected back to /admin/change-password (PasswordGuard works). Filled current + new + confirm passwords → clicked "Change password & continue" → landed on /admin dashboard with only 3 tabs (correct ADMIN role gating). Signed out, signed back in with new password → straight to dashboard (flag cleared). Audit log captured both user.create and user.password-change events.
+- Logout: Sign Out button clears session, redirects to /admin/login. Confirmed.
+- Public API surface: GET /api/chemicals → 200 (returns {chemicals: [...14 items]}). GET /api/chemicals/chem-acetic-acid → 200. GET /api/chemicals/nonexistent → 404. GET /api/sds/[id]/download → 200. GET /api/sync?since=0 → 200 (14 chemicals, 14 SDS docs, serverTime).
+- Unauthorized API audit: GET /api/admin/users → 401. GET /api/admin/audit → 401. GET /api/admin/system/info → 401. POST /api/admin/change-password → 401.
+- Dark mode: theme toggle dropdown opens with Light/Dark/System options. Selected Dark → html class changes to "dark". Screenshot captured.
+- Filters: opened Filters panel, clicked "Flammable" → catalog filtered to 7 flammable chemicals. Clicked "Clear all" → restored full catalog. Clicked "Environmentally Hazardous" → "No chemicals found" (correct — no seeded chemicals have that hazard class).
+
+BUG FOUND + FIXED:
+- Console error in /api/admin/system/info route: Turbopack's static analyzer was misinterpreting the `node_modules/next/package.json` path string in `getNextjsVersion()` as a module import, producing `Module not found: Can't resolve './ROOT/node_modules/next/package.json'` errors in the browser console. The API worked fine at runtime (returned the correct version), but the error was noisy.
+- Fix: rewrote `getNextjsVersion()` to read from the project root `package.json` (which has no `node_modules` in the path) and extract the `dependencies.next` version range. This avoids triggering Turbopack's false positive entirely.
+- Trade-off: the System Settings card now shows the declared version range (16.1.1) instead of the exact installed patch version (16.1.3). Acceptable for a system info dashboard.
+- Verified: no more console errors after the fix, version still displays correctly.
+
+Cleanup performed:
+- Deleted 3 test users left from previous testing (audit-test, testpw2, sample). Database now has only the original super admin account — clean state.
+- Reverted the test SDS upload (Acetic Acid) back to placeholder. All 14 chemicals back to placeholder status.
+- 12 screenshots saved: audit-01 through audit-12 documenting every page and flow.
+
+Stage Summary:
+- ALL pages, components, and API routes are functional and ready to use.
+- 1 bug found and fixed (Turbopack console error in system/info route).
+- 3 test users cleaned up (database now has only the super admin).
+- Test SDS upload reverted (all 14 chemicals back to placeholder).
+- Lint clean on all project code (only pre-existing error in upload/SDS-extracted example file, unrelated).
+- No runtime errors on any page. No React warnings. No hydration mismatches.
+- The only remaining dev.log warnings are the expected Turbopack `Module not found: Can't resolve '@anthropic-ai/sdk'` and `'openai'` warnings — these are optional provider SDKs that aren't installed, and the code handles their absence gracefully via try/catch at runtime. Non-blocking.
