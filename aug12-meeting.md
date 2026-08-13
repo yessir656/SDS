@@ -52,3 +52,44 @@ Prepared by:							Reviewed by:
 
 Shaun Wesley Y. Simbajon					Eric B. Casila
 ISA I, PMD-MIS						ISA III, PMD-MIS
+
+---
+
+## Implementation Status (as of last update)
+
+> This addendum is appended below the original meeting record for traceability. The meeting notes above are preserved verbatim — do not edit them. This status section tracks what has been built in response to the meeting, and what has been explicitly deferred.
+
+### §3.1 Emergency Contacts — **DEFERRED**
+The August 12 meeting proposed a fixed MIRDC emergency contact list (PCO, Spillage Brigade, Fire Brigade BFP Taguig, First Aid Brigade, Safety Officer). This has **not been implemented**. The existing per-chemical `emergencyContact` field is still in place, but the proposed MIRDC-specific contact directory section is not yet built.
+
+### §3.2 Chemical Classification and Regulatory Tags — **PARTIALLY IMPLEMENTED**
+The `regulatoryTags` field exists in `prisma/schema.prisma` (JSON `string[]`, default `"[]"`) and on the TypeScript `Chemical` type. A `RegulatoryTags` component renders them. However, the seed data sets all 14 chemicals to empty arrays, and there is no admin UI to populate the field or filter by it. The DENR-EMB / PNP / PDEA classification lists mentioned in the Action Items have not been provided yet, so the field is structurally ready but unused.
+
+### §3.3 PPE Requirements — **PARTIALLY IMPLEMENTED**
+The `personalProtectiveEquipment` field exists on the `Chemical` model (JSON array) and is populated by the AI auto-fill feature (extracted from SDS Section 8). It is displayed in the chemical detail view and in the emergency view. There is **no dedicated PPE section** as proposed in the meeting — PPE is shown alongside other safety information rather than as a standalone section.
+
+### §4 System Management & Administration — **IMPLEMENTED (exceeded scope)**
+The meeting specified "MIS will serve as the Super Administrator" and proposed per-division focal persons as administrators. Implementation went further:
+- 3-tier role hierarchy: `SUPER_ADMIN` (MIS) > `ADMIN` (focal persons) > `USER` (reserved, cannot sign in)
+- SUPER_ADMIN can create / edit / disable / delete admin accounts via the in-app Users tab (no longer requires editing `.env` + re-seeding for new admins)
+- Audit log records every chemical / SDS / user / system mutation with actor, before/after JSON, IP, timestamp
+- System Settings tab gives SUPER_ADMIN live visibility into AI provider config, storage, database, sync stats, and runtime info
+- Password change on next login is enforced (triple-layered) for newly created admins and after password resets
+
+### §4 Initial SDS Upload by Jhon Ivan — **IMPLEMENTED**
+14 chemicals are seeded with placeholder SDS PDFs. Admins (including Jhon Ivan's account once provisioned) can upload real SDS PDFs via the SDS tab. The AI auto-fill feature extracts 15 fields from each uploaded PDF.
+
+### Action Items — **EXPLICITLY DEFERRED**
+Per current scope decisions, the two Action Items from the meeting are **not implemented** and are not on the near-term roadmap:
+1. **SDS Requirement for Procurement Documents** (PRs/POs must be supported by SDS) — this is a procurement-process change, not a software feature. Out of scope for the SDS-CHEM codebase.
+2. **Provision of Chemical Classification Lists and Existing SDS Files** — depends on Ms. Gina Catalan providing the controlled/regulated chemicals list and scanned SDS PDFs. Blocked on external input.
+
+### Additional features built (not from this meeting)
+- AI auto-fill from PDF (VLM provider abstraction: `zai` sandbox default, `gemini` for local dev)
+- Offline-first PWA with delta sync
+- Emergency mode (full-screen, offline, context-aware FAB)
+- Dark mode, responsive design, accessibility
+- 3-tier admin role hierarchy with lockout prevention
+- Append-only audit log
+- System Settings tab with AI provider test-connection
+- Password change on next login (triple-layered enforcement)

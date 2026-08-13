@@ -19,21 +19,56 @@ When you save a change, the public PWA automatically pulls the update the next t
 
 ---
 
-## 2. Your Admin Account
+## 2. Your Admin Account & Role
 
-A single initial admin account is provisioned for you. Its credentials are stored in the server environment file (`.env`) as `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+There are **two admin roles** in SDS-CHEM:
+
+| Role | What they can do |
+|---|---|
+| **ADMIN** | Manage chemicals, upload SDS PDFs, use AI auto-fill. This is the role assigned to laboratory focal persons. |
+| **SUPER_ADMIN** | Everything an ADMIN can do, **plus**: create/edit/disable/delete other admin accounts, view the audit log, and view system settings (AI provider, storage, database, sync stats). Reserved for MIS. |
+
+(A third role, `USER`, exists in the database but cannot sign in — it is reserved for future use.)
+
+### Initial admin account
+
+The first admin account is provisioned from the server environment file (`.env`) via the seed script:
+
+```bash
+bun run db:seed
+```
+
+By default the seeded account is a **`SUPER_ADMIN`** (configurable via the `ADMIN_ROLE` env var if you want to seed as a regular `ADMIN` instead).
 
 > **Default (development):** `admin@mirdc.dost.gov.ph` — change the password before any production deployment.
 
-### To change the admin password
-1. Edit `.env` and set `ADMIN_PASSWORD` to a new strong password.
-2. Re-run the seed script (this re-creates / updates the admin record):
-   ```bash
-   bun run db:seed
-   ```
-3. Restart the dev server.
+### Creating additional admins (SUPER_ADMIN only)
 
-> The password is never stored in plaintext — it is hashed with bcrypt (12 rounds) before being written to the database.
+Once you're signed in as a SUPER_ADMIN, **do not** share your password. Instead, create a separate account for each person who needs admin access:
+
+1. Open the **Users** tab in the admin dashboard.
+2. Click **"Add User"**.
+3. Enter their name, email, a temporary password, and choose their role (`ADMIN` or `SUPER_ADMIN`).
+4. Leave **"Require password change on next login"** checked (default) — this forces them to set their own password the first time they sign in.
+5. Click **Create**.
+
+The new user appears in the table with an amber "PW change" badge. Hand them their temporary credentials over a secure channel; they will be forced to choose a new password on first sign-in.
+
+### Changing your own password
+
+If you ever need to change your own password (e.g. you suspect it was leaked, or your account was flagged for a forced change):
+
+1. Sign in. If your account has `passwordChangeRequired = true`, you will be automatically redirected to `/admin/change-password` and cannot reach the dashboard until you complete it.
+2. On the change-password page, enter your **current** password, then your **new** password twice.
+3. Click **Change password & continue**. You'll be redirected to the dashboard — no need to sign out and back in.
+
+> The new password must be at least 8 characters long and cannot be the same as the current password.
+
+### To reset a forgotten admin password (SUPER_ADMIN override)
+
+A SUPER_ADMIN can reset any admin's password from the **Users** tab → **Edit** → enter a new temporary password → save. This automatically flags the account with `passwordChangeRequired = true` so the user must choose their own password on next sign-in.
+
+> The seed-script method (`ADMIN_PASSWORD` in `.env` + `bun run db:seed`) still works for the original seeded account, but for all other admins use the in-app Users tab instead.
 
 ---
 
@@ -57,9 +92,9 @@ Use the **Sign out** button in the admin dashboard header. The session cookie is
 
 ## 4. The Admin Dashboard
 
-The dashboard at `/admin` has three tabs:
+The dashboard at `/admin` has **six tabs** (the last three are visible only to `SUPER_ADMIN`):
 
-### 4.1 Overview
+### 4.1 Overview  (all admins)
 At-a-glance metrics:
 - Total chemicals in the catalog
 - How many SDS PDFs are uploaded vs. still on placeholder
@@ -68,7 +103,7 @@ At-a-glance metrics:
 
 Use this to spot chemicals that still need their real SDS PDF uploaded.
 
-### 4.2 Chemicals
+### 4.2 Chemicals  (all admins)
 A searchable, sortable table of every chemical. Each row shows:
 - Chemical name, CAS number, formula
 - Signal word (DANGER / WARNING)
@@ -83,7 +118,7 @@ A searchable, sortable table of every chemical. Each row shows:
 | **Edit** | Opens the same form pre-filled. Update any field and save. Bumps the chemical's `serverVersion` so devices know to re-sync. |
 | **Delete** | Soft-deletes the chemical. It disappears from the public catalog on the next sync, but is recoverable in the DB via `deletedAt`. |
 
-### 4.3 SDS
+### 4.3 SDS  (all admins)
 Manage the actual PDF files. Each chemical has exactly one SDS document (1:1).
 
 **Actions:**
@@ -96,7 +131,84 @@ Manage the actual PDF files. Each chemical has exactly one SDS document (1:1).
 
 ---
 
-## 4.4 AI Auto-Fill from PDF  ⚡ (New!)
+## 4.5 Users Tab  (SUPER_ADMIN only)
+
+Manage admin accounts. Searchable table showing each user's name, email, role, status (Active / Disabled / PW change required), and last login time.
+
+**Actions:**
+| Action | What it does |
+|---|---|
+| **Add User** | Create a new admin account. Choose role (`ADMIN` or `SUPER_ADMIN`), enter a temporary password, and optionally check "Require password change on next login" (on by default). |
+| **Edit** | Update name, role, disable/enable the account, or reset the password. Resetting a password automatically flags the account for a forced change unless you explicitly uncheck the box. |
+| **Delete** | Permanently remove the account. Cannot delete yourself. |
+
+**Lockout prevention (built-in):**
+- You cannot change your own role away from `SUPER_ADMIN`.
+- You cannot disable or delete your own account.
+- You cannot disable or delete the last remaining active `SUPER_ADMIN` (the system always keeps at least one so nobody gets locked out).
+
+> **Tip:** Use **Disable** (not Delete) for admins who should temporarily lose access — their account stays in the audit trail and can be re-enabled later.
+
+---
+
+## 4.6 Audit Log Tab  (SUPER_ADMIN only)
+
+Every mutating admin action is recorded in an append-only audit log. The viewer shows the newest entries first, with cursor-based pagination.
+
+**Filters:**
+- **Entity type** — `chemical`, `sds`, `user`, `session`, `system`
+- **Action prefix** — e.g. `chemical.` to see all chemical mutations, or `user.` for user-management actions
+
+Each row shows: timestamp, actor (email), action, summary, and IP address. Click a row to expand and inspect the **before / after** JSON snapshots (for updates and deletes) or the **after** snapshot (for creates).
+
+**Actions currently logged:**
+| Action | When |
+|---|---|
+| `chemical.create` / `chemical.update` / `chemical.delete` | Admin creates / edits / soft-deletes a chemical |
+| `sds.upload` / `sds.replace` / `sds.revert` | Admin uploads / replaces / reverts an SDS PDF |
+| `sds.extract` | Admin triggers AI auto-fill on an SDS PDF |
+| `user.create` / `user.update` / `user.delete` | SUPER_ADMIN creates / edits / deletes an admin account |
+| `user.password-change` | Any admin changes their own password |
+| `system.test-ai` | SUPER_ADMIN runs the AI provider connection test |
+
+> The audit log is **fire-and-forget** — it never blocks or breaks the main operation, even if logging itself fails.
+
+---
+
+## 4.7 System Tab  (SUPER_ADMIN only)
+
+Live, read-only system information. Useful for diagnosing issues or verifying the AI provider is configured correctly.
+
+**Five info cards:**
+1. **AI Provider** — current provider (`zai` / `gemini` / `openai` / `anthropic`), model, whether the API key is configured (masked hint), and whether the SDK package is installed.
+2. **Storage** — total size of all SDS PDFs on disk, file count, largest file, average file size, and the storage directory path.
+3. **Database** — SQLite file size, file path, and connection URL.
+4. **Sync & Data** — counts of chemicals (active + deleted), SDS documents (placeholder + available), users, and audit log entries; last `updatedAt` timestamp; max `serverVersion`.
+5. **System Runtime** — Node.js version, platform/arch, environment (development/production), Next.js version, server uptime, current time, timezone.
+
+**Test Connection button** (in the AI Provider card): sends a minimal probe request to the configured AI provider and reports `OK` (with latency and a response preview) or `Failed` (with the error message). Does **not** send any image and does **not** touch the database. The result is logged to the audit trail as `system.test-ai`.
+
+> All values are **read-only**. To change the AI provider, edit `.env` (`AI_PROVIDER`, `GEMINI_API_KEY`, `GEMINI_MODEL`, etc.) and restart the dev server. Runtime config mutation is a future enhancement.
+
+---
+
+## 4.8 Password Change on Next Login
+
+When a SUPER_ADMIN creates a new admin account or resets an existing admin's password, the account is flagged with `passwordChangeRequired = true`. The next time that user signs in:
+
+1. They enter their credentials on `/admin/login` as usual.
+2. Authentication succeeds, but the JWT carries `passwordChangeRequired = true`.
+3. A client-side `PasswordGuard` component (mounted in the admin layout) detects the flag and redirects to `/admin/change-password`.
+4. The user enters their **current** password + a new password (twice) + clicks **Change password & continue**.
+5. The server verifies the current password, hashes the new one, clears the flag, and logs `user.password-change` to the audit trail.
+6. The JWT is refreshed in-place via `useSession().update()` — no second sign-in needed.
+7. The user lands on the dashboard.
+
+**Defense-in-depth:** even if a user somehow bypasses the client-side guard, every admin API route (except `/api/admin/change-password`) calls `requireAdmin()` / `requireSuperAdmin()`, both of which return 401 for users with `passwordChangeRequired = true`. The change-password endpoint itself uses a direct `getServerSession` check and verifies the current password before accepting the new one.
+
+---
+
+## 4.4 AI Auto-Fill from PDF  ⚡
 
 **This is the fastest way to add a chemical.** Instead of typing every field by hand, you upload the manufacturer's SDS PDF and the AI reads it for you.
 
@@ -218,7 +330,8 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 
 ## 8. Quick Reference — Daily Workflow
 
-1. **Log in** at `/admin/login`.
+### For every admin (ADMIN + SUPER_ADMIN)
+1. **Log in** at `/admin/login`. If your account was flagged for a password change, you'll be redirected to `/admin/change-password` first — complete it to reach the dashboard.
 2. Open the **Chemicals** tab. Search for the chemical you want to update.
 3. Click **Edit** → make changes → **Save**.
 4. Switch to the **SDS** tab. Find the same chemical.
@@ -226,15 +339,22 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 6. Watch the status badge flip from *Placeholder* → *Available*.
 7. Done. Devices will pick up both the chemical edit and the new PDF automatically.
 
+### For SUPER_ADMIN only (extra tasks)
+8. **Onboard a new admin:** Users tab → Add User → enter their email + a temporary password → leave "Require password change on next login" checked → Create. Hand them the temp credentials securely.
+9. **Audit a change:** Audit Log tab → filter by `chemical.` or `user.` → expand a row to inspect before/after JSON.
+10. **Verify AI provider:** System tab → review the AI Provider card → click **Test Connection** if anything looks off.
+
 ---
 
 ## 9. Security Notes for Admins
 
-- **Never share your admin password.** Each admin should have their own account.
+- **Never share your admin password.** Each admin should have their own account — a SUPER_ADMIN can create accounts from the Users tab.
 - **Always log out** from shared / kiosk machines.
 - The admin session expires after 30 days of inactivity.
-- All admin actions are auditable via the `updatedById` field on chemicals and the `uploadedById` field on SDS documents.
-- If you suspect a credential leak, change `ADMIN_PASSWORD` in `.env`, re-seed, and notify the developer to rotate `NEXTAUTH_SECRET`.
+- All admin actions are recorded in the **audit log** (`AuditLog` table) with actor, action, before/after JSON, IP, and timestamp. SUPER_ADMINs can review this in the Audit Log tab.
+- Every chemical carries an `updatedById` field; every SDS document carries an `uploadedById` field — both point to the responsible admin.
+- New admin accounts (and any account whose password was reset by a SUPER_ADMIN) are forced to change their password on next login.
+- If you suspect a credential leak: change your own password via the change-password page (or ask a SUPER_ADMIN to reset it for you), and notify the developer to rotate `NEXTAUTH_SECRET`.
 
 ---
 

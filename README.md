@@ -47,7 +47,7 @@ bun run start
 | Framework | Next.js 16 (App Router, Turbopack) + TypeScript (strict) |
 | Server DB (source of truth) | Prisma + SQLite |
 | Client DB (offline cache) | Dexie (IndexedDB) — delta-synced from the server |
-| Auth | NextAuth.js v4 (Credentials provider, JWT sessions, bcrypt 12 rounds) |
+| Auth | NextAuth.js v4 (Credentials provider, JWT sessions, bcrypt 12 rounds) — 3-tier roles: `SUPER_ADMIN` > `ADMIN` > `USER` |
 | AI auto-fill | Provider-agnostic VLM: `zai` (sandbox default) / `gemini` (local) / `openai` / `anthropic` |
 | PDF rasterization | pdfjs-dist + @napi-rs/canvas (pure JS, no Poppler) |
 | PWA | Vanilla service worker + web manifest + generated icons |
@@ -72,7 +72,7 @@ The **server (Prisma + SQLite) is the source of truth** for all chemical and SDS
 - SDS PDFs are versioned; clients only re-download a PDF when its version changes.
 - User preferences (favorites, notes) stay **local-only** — never sent to the server.
 
-The **admin dashboard** (`/admin`) is a separate authenticated area (NextAuth Credentials provider, `role=ADMIN`). All admin API routes enforce `requireAdmin()` server-side; the edge middleware is defense-in-depth.
+The **admin dashboard** (`/admin`) is a separate authenticated area (NextAuth Credentials provider). There are two admin tiers: **`ADMIN`** (manage chemicals + SDS) and **`SUPER_ADMIN`** (everything ADMIN does, plus user management, audit log, and system settings). All admin API routes enforce `requireAdmin()` / `requireSuperAdmin()` server-side; the edge middleware is defense-in-depth. Every mutating admin action is recorded in an append-only `AuditLog` table.
 
 ### Component Approach
 Components are grouped by feature domain (`catalog/`, `detail/`, `emergency/`, `ghs/`, `common/`, `layout/`, `admin/`). The **public app** is a single-route SPA — the catalog, detail, and emergency views all render on `/` with Zustand controlling which view is visible. This keeps the offline model simple (one HTML shell cached by the service worker). The **admin app** lives at `/admin` with its own layout and is not part of the offline PWA shell. Chemical cards, the search bar, and the emergency FAB are independently reusable. The floating emergency button is context-aware: it jumps directly to the selected chemical's emergency info in detail view, or opens a quick-select search dialog in the catalog.
@@ -98,10 +98,11 @@ src/
 │   ├── layout.tsx              # Root layout: metadata, theme provider, SW registration
 │   ├── page.tsx                # Public PWA single-route SPA (catalog → detail → emergency)
 │   ├── globals.css             # Tailwind v4 CSS-first config + custom animations
-│   ├── admin/                  # Admin dashboard (login + Overview/Chemicals/SDS tabs)
-│   │   ├── layout.tsx
-│   │   ├── page.tsx
-│   │   └── login/page.tsx
+│   ├── admin/                  # Admin dashboard (login + 6 tabs: Overview/Chemicals/SDS/Users/Audit/System)
+│   │   ├── layout.tsx          #   wraps children in <PasswordGuard>
+│   │   ├── page.tsx            #   tabs conditionally rendered by role
+│   │   ├── login/page.tsx
+│   │   └── change-password/page.tsx  # forced password change page
 │   └── api/
 │       ├── route.ts            # Health check
 │       ├── auth/[...nextauth]/ # NextAuth handler
@@ -111,7 +112,12 @@ src/
 │       └── admin/              # Admin API (auth required)
 │           ├── dashboard/      # GET stats
 │           ├── chemicals/      # POST create / GET / PUT / DELETE
-│           └── sds/            # POST upload / DELETE revert / POST extract (AI auto-fill)
+│           ├── sds/            # POST upload / DELETE revert / POST extract (AI auto-fill)
+│           ├── users/          # GET list / POST create / PATCH / DELETE  (SUPER_ADMIN only)
+│           ├── audit/          # GET paginated audit log  (SUPER_ADMIN only)
+│           ├── system/info/    # GET AI/storage/db/sync/runtime info  (SUPER_ADMIN only)
+│           ├── system/test-ai/ # POST probe the configured AI provider  (SUPER_ADMIN only)
+│           └── change-password/ # POST change own password  (any authenticated admin)
 ├── components/
 │   ├── catalog/                # Dashboard stats, chemical cards, search, filters
 │   ├── detail/                 # Full chemical detail with SDS sections
@@ -119,15 +125,16 @@ src/
 │   ├── ghs/                    # 9 GHS pictogram SVG components
 │   ├── common/                 # Theme provider/toggle, offline indicator, SW register, sync status
 │   ├── layout/                 # Header, footer
-│   └── admin/                  # Admin overview, chemical manager, SDS manager, session provider
+│   └── admin/                  # Admin overview, chemical manager, SDS manager, user manager, audit log viewer, system settings, password guard, session provider
 ├── hooks/                      # useOnlineStatus, useDatabaseReady, useSync, useMobile, useToast
 ├── lib/
 │   ├── db.ts                   # Prisma client (singleton)
-│   ├── auth.ts                 # NextAuth options + bcrypt hash/verify
-│   ├── session.ts              # requireAdmin() server-side guard
+│   ├── auth.ts                 # NextAuth options + bcrypt hash/verify (3-tier role, passwordChangeRequired handling)
+│   ├── session.ts              # requireAdmin() / requireSuperAdmin() server-side guards (both block passwordChangeRequired users)
+│   ├── audit.ts                # logAction() fire-and-forget audit helper + auditContext() builder
 │   ├── storage.ts              # Safe SDS file storage (UUID keys, path-traversal guard)
 │   ├── validation.ts           # zod schemas for chemical & SDS inputs
-│   ├── ai-vlm.ts               # Provider-agnostic VLM abstraction (zai/gemini/openai/anthropic)
+│   ├── ai-vlm.ts               # Provider-agnostic VLM abstraction (zai/gemini/openai/anthropic) + getProviderInfo() + testProviderConnection()
 │   ├── pdf-rasterize.ts        # PDF → PNG (pdfjs-dist + @napi-rs/canvas, pure JS)
 │   ├── pdf-placeholder.ts      # Generates minimal valid placeholder PDFs
 │   ├── sync-engine.ts          # Client delta sync engine (mutex, rate-limit, SDS blob caching)

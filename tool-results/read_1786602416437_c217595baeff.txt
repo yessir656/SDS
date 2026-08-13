@@ -1,0 +1,780 @@
+     1→# SDS-CHEM — Developer Guide
+     2→
+     3→**Audience:** Developers maintaining, extending, or deploying the SDS-CHEM application.
+     4→
+     5→**Purpose:** A complete technical reference covering architecture, file map, database schema, API surface, sync engine, security model, commands, and a testing checklist.
+     6→
+     7→---
+     8→
+     9→## 0. Quick Start — How to Run This Project
+    10→
+    11→> Read this section first. It covers everything from a fresh `git clone` to a running app.
+    12→
+    13→### 0.1 Prerequisites
+    14→
+    15→| Requirement | Why | Install |
+    16→|---|---|---|
+    17→| **Bun** (required) | The `db:seed` script and production `start` script run TypeScript / the standalone server via Bun. npm/node alone will **not** work. | https://bun.sh/docs/installation |
+    18→| **Node.js 18+** | Next.js 16 needs it. Bun usually bundles a compatible runtime, but having Node helps with tooling. | https://nodejs.org/ |
+    19→| **Git** | To clone the repo. | https://git-scm.com/ |
+    20→
+    21→> **Windows users:** Install Bun with PowerShell (`irm bun.sh/install.ps1 | iex`). All commands below work in **Git Bash** or **WSL**. If you only have CMD/PowerShell, the `dev` script still works (it's just `next dev -p 3000`), but `db:seed` needs Bun regardless.
+    22→
+    23→### 0.2 Step-by-Step (fresh clone)
+    24→
+    25→```bash
+    26→# 1. Clone the repository
+    27→git clone <your-repo-url> sds-chem
+    28→cd sds-chem
+    29→
+    30→# 2. Install dependencies with Bun (do NOT use npm install)
+    31→bun install
+    32→
+    33→# 3. Create your environment file from the template
+    34→cp .env.example .env
+    35→
+    36→# 4. Edit .env — set these values:
+    37→#    - ADMIN_EMAIL         (your admin login email)
+    38→#    - ADMIN_PASSWORD      (a strong password — will be bcrypt-hashed)
+    39→#    - NEXTAUTH_SECRET     (generate one — see the comment in .env.example)
+    40→#    - DATABASE_URL        (already set to ./db/custom.db — leave as-is)
+    41→#    - NEXTAUTH_URL        (already http://localhost:3000 — leave as-is)
+    42→#
+    43→#    Generate a NEXTAUTH_SECRET with:
+    44→#      bun -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'
+    45→#      node -e "console.log(require('crypto').randomBytes(32).toString('hex'))'"
+    46→
+    47→# 5. Create the SQLite database + tables
+    48→bun run db:push
+    49→
+    50→# 6. Seed the database:
+    51→#    - Creates the admin user from ADMIN_EMAIL / ADMIN_PASSWORD
+    52→#    - Imports the 14 seed chemicals
+    53→#    - Generates a placeholder SDS PDF for each chemical
+    54→bun run db:seed
+    55→
+    56→# 7. Start the dev server
+    57→bun run dev
+    58→```
+    59→
+    60→Open **http://localhost:3000** in your browser. You should see the chemical catalog with 14 chemicals.
+    61→
+    62→### 0.3 Accessing the admin dashboard
+    63→
+    64→1. Go to **http://localhost:3000/admin/login**
+    65→2. Sign in with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` you set in `.env`.
+    66→3. You'll be redirected to `/admin` — the dashboard with Overview / Chemicals / SDS tabs.
+    67→
+    68→### 0.4 Why `npm run dev` doesn't work (and how to fix it)
+    69→
+    70→If you already ran `npm install` and `npm run dev`, you likely hit one of these:
+    71→
+    72→| Symptom | Cause | Fix |
+    73→|---|---|---|
+    74→| `npm run dev` fails with `tee: command not found` | Old script used a Unix-only `tee` pipe. **This has been fixed** — update to the latest code, or run `npx next dev -p 3000` directly. | `bun install` (or `npm install`) on latest code, then `bun run dev` |
+    75→| `npm run db:seed` fails with `SyntaxError` or `Cannot find module` | The seed script is TypeScript run via Bun. Node/npm can't execute `.ts` files directly. | Install Bun, then run `bun run db:seed` |
+    76→| App loads but shows "Database Error" / 0 chemicals | The database hasn't been created/seeded yet. | Run `bun run db:push && bun run db:seed` |
+    77→| `PrismaClientInitializationError` | `DATABASE_URL` points to a path that doesn't exist on your machine. | Make sure `.env` has `DATABASE_URL=file:./db/custom.db` (relative path). Run `bun run db:push`. |
+    78→| 401 on every admin API | `NEXTAUTH_SECRET` is missing or the `.env` wasn't loaded. | Set `NEXTAUTH_SECRET` in `.env`; restart `bun run dev`. |
+    79→| Login fails with "Invalid email or password" | Admin user not created, or `.env` credentials don't match what's in the DB. | Run `bun run db:seed` again (it's idempotent — updates the admin to match `.env`). |
+    80→
+    81→### 0.5 Migrating from npm to Bun (if you already ran npm install)
+    82→
+    83→If you already ran `npm install`, you can clean up and switch to Bun:
+    84→
+    85→```bash
+    86→# Remove npm's node_modules and lockfile
+    87→rm -rf node_modules package-lock.json
+    88→
+    89→# Install with Bun
+    90→bun install
+    91→
+    92→# Continue with step 5 onwards (db:push, db:seed, dev)
+    93→bun run db:push
+    94→bun run db:seed
+    95→bun run dev
+    96→```
+    97→
+    98→> **Note:** `bun install` reads the same `package.json` and creates `bun.lockb` instead of `package-lock.json`. Both are fine; just don't mix them.
+    99→
+   100→### 0.6 Quick command reference
+   101→
+   102→| Command | What it does |
+   103→|---|---|
+   104→| `bun install` | Install dependencies |
+   105→| `bun run dev` | Start dev server on http://localhost:3000 |
+   106→| `bun run lint` | Run ESLint |
+   107→| `bun run db:push` | Create/update SQLite schema from `prisma/schema.prisma` |
+   108→| `bun run db:seed` | Create admin user + seed 14 chemicals (idempotent) |
+   109→| `bun run db:generate` | Regenerate Prisma Client after schema changes |
+   110→| `bun run db:reset` | ⚠️ Drop and recreate the database (destroys data) |
+   111→| `bun run build` | Production build (Unix-only due to `cp -r`) |
+   112→| `bun run start` | Run the production standalone server (after `build`) |
+   113→
+   114→---
+   115→
+   116→## 1. Tech Stack
+   117→
+   118→| Layer | Technology |
+   119→|---|---|
+   120→| Framework | Next.js 16 (App Router, Turbopack) |
+   121→| Language | TypeScript 5 (strict) |
+   122→| UI | Tailwind CSS v4 + shadcn/ui (New York) + Lucide icons |
+   123→| Client state | Zustand |
+   124→| Server state | TanStack Query (available), fetch-based clients |
+   125→| Client DB (offline-first) | Dexie (IndexedDB) |
+   126→| Server DB | Prisma + SQLite |
+   127→| Auth | NextAuth.js v4 (Credentials provider, JWT sessions) |
+   128→| Password hashing | bcryptjs (12 rounds) |
+   129→| Validation | zod |
+   130→| PWA | Vanilla service worker + web manifest |
+   131→| Runtime | Bun (dev), Node-compatible standalone build |
+   132→
+   133→---
+   134→
+   135→## 2. High-Level Architecture
+   136→
+   137→```
+   138→┌─────────────────────────────────────────────────────────────────┐
+   139→│                        PUBLIC PWA  (/)                          │
+   140→│  Catalog → Detail → Emergency views (single-route SPA, Zustand) │
+   141→│  Offline-first: all reads go to Dexie (IndexedDB)               │
+   142→│  Writes (favorites/notes/prefs) are LOCAL ONLY                  │
+   143→└───────────────┬─────────────────────────────────┬───────────────┘
+   144→                │ GET /api/sync?since=<ts>         │ GET /api/chemicals
+   145→                │ GET /api/sds/[id]/download       │
+   146→                ▼                                  ▼
+   147→┌─────────────────────────────────────────────────────────────────┐
+   148→│                     PUBLIC API (no auth)                        │
+   149→│  /api/sync          delta sync (chemicals + SDS metadata)       │
+   150→│  /api/chemicals     list / get chemical                         │
+   151→│  /api/sds/[id]/download   stream SDS PDF                        │
+   152→└───────────────┬─────────────────────────────────────────────────┘
+   153→                │ Prisma
+   154→                ▼
+   155→┌─────────────────────────────────────────────────────────────────┐
+   156→│                  PRISMA + SQLite  (source of truth)             │
+   157→│  User · Chemical · SdsDocument                                  │
+   158→└─────────────────────────────────────────────────────────────────┘
+   159→                ▲
+   160→                │ requireAdmin()  (server-side session check)
+   161→┌───────────────┴─────────────────────────────────────────────────┐
+   162→│                    ADMIN API (auth required)                    │
+   163→│  /api/admin/dashboard          stats                            │
+   164→│  /api/admin/chemicals          POST  (create)                   │
+   165→│  /api/admin/chemicals/[id]     GET / PUT / DELETE               │
+   166→│  /api/admin/sds                POST  (upload PDF)               │
+   167→│  /api/admin/sds/[id]           DELETE (revert to placeholder)   │
+   168→└───────────────┬─────────────────────────────────────────────────┘
+   169→                ▲
+   170→                │ NextAuth session (JWT, httpOnly cookie)
+   171→┌───────────────┴─────────────────────────────────────────────────┐
+   172→│                    ADMIN UI  (/admin)                           │
+   173→│  /admin/login   sign-in form                                    │
+   174→│  /admin         dashboard: Overview / Chemicals / SDS tabs      │
+   175→│  Protected by src/middleware.ts (edge, role=ADMIN)              │
+   176→└─────────────────────────────────────────────────────────────────┘
+   177→```
+   178→
+   179→### Key principles
+   180→- **Server is the source of truth** for chemical & SDS data. Client Dexie DB is a cache.
+   181→- **Offline-first:** the public PWA reads from Dexie. It works fully offline after first sync.
+   182→- **Delta sync:** clients ask for changes since their last sync timestamp — never the whole DB.
+   183→- **SDS PDFs are versioned & cached** as Blobs in IndexedDB; only re-downloaded when version changes.
+   184→- **User preferences (favorites/notes) stay local** — never sent to the server, never overwritten.
+   185→- **Admin authorization is server-side** in every admin API route (`requireAdmin()`). The edge middleware is defense-in-depth only.
+   186→
+   187→---
+   188→
+   189→## 3. File Map
+   190→
+   191→### App routes
+   192→```
+   193→src/app/
+   194→├── layout.tsx                       Root layout, PWA metadata, ThemeProvider, SessionProvider
+   195→├── page.tsx                         Public PWA single-route SPA (catalog/detail/emergency)
+   196→├── globals.css                      Tailwind v4 CSS-first config + animations + scrollbar
+   197→├── admin/
+   198→│   ├── layout.tsx                   Admin layout shell
+   199→│   ├── page.tsx                     Admin dashboard (Overview / Chemicals / SDS tabs)
+   200→│   └── login/page.tsx               Sign-in form
+   201→└── api/
+   202→    ├── route.ts                     Health check
+   203→    ├── auth/[...nextauth]/route.ts  NextAuth handler
+   204→    ├── sync/route.ts                GET /api/sync?since=<ts>  (public delta sync)
+   205→    ├── chemicals/
+   206→    │   ├── route.ts                 GET /api/chemicals
+   207→    │   └── [id]/route.ts            GET /api/chemicals/[id]
+   208→    ├── sds/[id]/download/route.ts   GET  (stream SDS PDF)
+   209→    └── admin/
+   210→        ├── dashboard/route.ts       GET  (admin stats)
+   211→        ├── chemicals/
+   212→        │   ├── route.ts             POST (create)
+   213→        │   └── [id]/route.ts        GET / PUT / DELETE
+   214→        └── sds/
+   215→            ├── route.ts             POST (upload PDF)
+   216→            ├── [id]/route.ts        DELETE (revert to placeholder)
+   217→            └── extract/route.ts     POST (AI auto-fill from PDF — VLM extraction)
+   218→```
+   219→
+   220→### Library code
+   221→```
+   222→src/lib/
+   223→├── db.ts                Prisma client (singleton, query-log off in prod)
+   224→├── auth.ts              NextAuth options + hashPassword / verifyPassword (bcrypt)
+   225→├── session.ts           requireAdmin() server-side guard (throws 401 if no session)
+   226→├── storage.ts           Safe SDS file storage (UUID filenames, no path exposure)
+   227→├── validation.ts        zod schemas for chemical & SDS inputs
+   228→├── pdf-placeholder.ts   Generates a minimal valid placeholder PDF
+   229→├── pdf-rasterize.ts     PDF → PNG renderer (pdfjs-dist + @napi-rs/canvas, pure JS, no Poppler)
+   230→├── ai-vlm.ts            Provider-agnostic VLM abstraction (zai / gemini / openai / anthropic)
+   231→├── ppe.ts               PPE display helpers / lookup tables
+   232→├── sync-engine.ts       Client delta sync engine (mutex, rate-limit, SDS blob caching)
+   233→├── local-db.ts          Dexie schema v2 (chemicals, sdsDocuments, sdsBlobs, syncMeta, ...)
+   234→├── seed-data.ts         14 chemicals + 7 locations + default prefs (migration source)
+   235→├── serialize.ts         JSON ↔ DB field (de)serialization helpers
+   236→└── utils.ts             cn() and misc
+   237→```
+   238→
+   239→### Components
+   240→```
+   241→src/components/
+   242→├── layout/        app-header.tsx, app-footer.tsx
+   243→├── catalog/       chemical-catalog, chemical-card, search-bar, filter-panel, dashboard-stats
+   244→├── detail/        chemical-detail.tsx
+   245→├── emergency/     emergency-view.tsx, emergency-fab.tsx
+   246→├── ghs/           pictograms.tsx (all 9 GHS pictograms as inline SVG)
+   247→├── common/        theme-provider, theme-toggle, offline-indicator,
+   248→│                  sync-status-indicator, service-worker-register
+   249→├── admin/         session-provider, admin-overview, chemical-manager, sds-manager
+   250→└── ui/            shadcn/ui component set (55 components)
+   251→```
+   252→
+   253→### Other
+   254→```
+   255→prisma/schema.prisma      User · Chemical · SdsDocument
+   256→src/middleware.ts         Edge-level /admin/* protection (role=ADMIN)
+   257→src/types/index.ts        Domain types (ChemicalRecord, GhsPictogram, HazardClass, SyncStatus, ...)
+   258→src/types/next-auth.d.ts  Augments NextAuth session/token with `role`
+   259→src/store/app-store.ts    Zustand: view routing, search/filter, sync status
+   260→src/hooks/                use-sync, use-database-ready, use-online-status, use-mobile, use-toast
+   261→
+   262→public/manifest.json      PWA manifest
+   263→public/sw.js              Vanilla service worker (app-shell cache, SWR for assets)
+   264→public/icons/             icon.svg + 192/512 PNGs (any + maskable)
+   265→scripts/seed-db.ts        Seeds admin from .env + migrates 14 chemicals into Prisma DB
+   266→scripts/generate-icons.mjssharp-based icon generator
+   267→
+   268→.env                      DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD, NEXTAUTH_SECRET, NEXTAUTH_URL
+   269→                          + optional AI_PROVIDER / GEMINI_API_KEY / GEMINI_MODEL
+   270→                          (AI_PROVIDER defaults to "zai" — sandbox-only. Set to "gemini"
+   271→                          for local dev. See §6A below.)
+   272→.env.example              Template (committed — safe placeholders, no real secrets)
+   273→next.config.ts            Security headers (CSP, HSTS, X-Frame-Options, ...), reactStrictMode
+   274→```
+   275→
+   276→---
+   277→
+   278→## 4. Database Schema (Prisma)
+   279→
+   280→### `User` — admin accounts only
+   281→| Field | Type | Notes |
+   282→|---|---|---|
+   283→| id | String (cuid) | PK |
+   284→| email | String | unique |
+   285→| passwordHash | String | bcrypt (12 rounds) |
+   286→| name | String? | optional display name |
+   287→| role | String | `"ADMIN"` or `"USER"` (only ADMIN can log in) |
+   288→| createdAt / updatedAt | DateTime | |
+   289→| Relations | `SdsDocument[] uploadedSds`, `Chemical[] updatedChemicals` | audit trail |
+   290→
+   291→### `Chemical` — central catalog entity
+   292→| Field | Type | Notes |
+   293→|---|---|---|
+   294→| id | String | PK (stable slug, e.g. `chem-acetone`) |
+   295→| casNumber, chemicalName, formula | String | identifiers |
+   296→| tradeName, manufacturer, supplier | String | provenance |
+   297→| signalWord | String | `"danger"` / `"warning"` |
+   298→| hazardClasses | String | JSON-encoded `HazardClass[]` |
+   299→| ghsPictograms | String | JSON-encoded `GhsPictogram[]` |
+   300→| storageLocation, department | String | physical location |
+   301→| safetyInstructions | String | |
+   302→| version | String | SDS document version label (e.g. `"1.4"`) |
+   303→| emergencyContact | String | |
+   304→| personalProtectiveEquipment | String | JSON array |
+   305→| firstAidMeasures, firefightingMeasures, accidentalReleaseMeasures | String | SDS sections 4/5/6 |
+   306→| **serverVersion** | Int | **sync key** — incremented on every update |
+   307→| createdAt, updatedAt | DateTime | |
+   308→| **deletedAt** | DateTime? | **soft delete** — sync propagates deletes |
+   309→| updatedById | String? | FK → User (audit) |
+   310→| Relations | `SdsDocument? sdsDocument` | 1:1 |
+   311→
+   312→Indexes: `updatedAt`, `deletedAt`, `chemicalName`, `casNumber`.
+   313→
+   314→### `SdsDocument` — one per chemical (1:1)
+   315→| Field | Type | Notes |
+   316→|---|---|---|
+   317→| id | String (cuid) | PK |
+   318→| chemicalId | String | unique FK → Chemical (cascade delete) |
+   319→| storageKey | String | safe generated filename (`<uuid>.pdf`) — never user-supplied |
+   320→| originalFileName | String | for display/download only |
+   321→| fileSize, mimeType | Int / String | |
+   322→| contentHash | String | sha256 of file content |
+   323→| status | String | `"placeholder"` / `"available"` |
+   324→| **version** | Int | **incremented on each replace** (client re-download trigger) |
+   325→| uploadedById | String? | FK → User (audit) |
+   326→| createdAt, updatedAt | DateTime | |
+   327→
+   328→Indexes: `updatedAt`, `status`.
+   329→
+   330→---
+   331→
+   332→## 5. Client Database (Dexie v2)
+   333→
+   334→```
+   335→chemicals      : ChemicalRecord  (keyPath: id)        + indexes on casNumber, department, etc.
+   336→sdsDocuments   : SdsMeta          (keyPath: chemicalId)
+   337→sdsBlobs       : { chemicalId, version, blob, fetchedAt }   ← SDS PDF Blob cache
+   338→syncMeta       : { key, value }   ← lastSyncTimestamp, syncMutex, etc.
+   339→locations      : LaboratoryLocation
+   340→preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
+   341→```
+   342→
+   343→**Why two stores?** `sdsDocuments` holds metadata (small, synced as JSON). `sdsBlobs` holds the actual PDF Blob (large, only re-fetched when `version` changes).
+   344→
+   345→---
+   346→
+   347→## 6. API Reference
+   348→
+   349→### Public (no auth)
+   350→| Method | Path | Purpose |
+   351→|---|---|---|
+   352→| GET | `/api/sync?since=<epoch-ms>` | Delta sync. Returns `{ chemicals: [...], sdsDocuments: [...], deletedChemicalIds: [...], serverTime }`. Only records with `updatedAt > since` (or `deletedAt > since`) are returned. |
+   353→| GET | `/api/chemicals` | List all non-deleted chemicals (metadata only, no PDF). |
+   354→| GET | `/api/chemicals/[id]` | Single chemical. |
+   355→| GET | `/api/sds/[id]/download` | Stream the SDS PDF for chemical `[id]`. Sets `Content-Type: application/pdf`. Used by both the public PWA (caches Blob) and admin "View". |
+   356→
+   357→### Admin (auth required — `requireAdmin()`)
+   358→| Method | Path | Purpose |
+   359→|---|---|---|
+   360→| GET | `/api/admin/dashboard` | Stats: total chemicals, SDS coverage, department distribution, recent updates. |
+   361→| POST | `/api/admin/chemicals` | Create chemical. Auto-creates a placeholder `SdsDocument`. Body validated by zod. |
+   362→| GET | `/api/admin/chemicals/[id]` | Read single (admin view). |
+   363→| PUT | `/api/admin/chemicals/[id]` | Update. Bumps `serverVersion`. Sets `updatedById`. |
+   364→| DELETE | `/api/admin/chemicals/[id]` | Soft-delete (`deletedAt = now`). Cascade-soft-deletes the SDS. |
+   365→| POST | `/api/admin/sds` | Upload / replace SDS PDF. Multipart form. Validates magic bytes + MIME + extension + size. Stores with UUID filename. Increments `version`, sets `status = available`. |
+   366→| DELETE | `/api/admin/sds/[id]` | Revert to placeholder. Removes the uploaded file, resets `status = placeholder`, increments `version`. |
+   367→| POST | `/api/admin/sds/extract` | **AI auto-fill.** Accepts an SDS PDF (multipart), rasterizes first 5 pages to PNG, sends to the configured VLM provider (`src/lib/ai-vlm.ts`), parses + sanitizes the JSON response, returns `{ success, data }`. 60s timeout. See §6A. |
+   368→
+   369→### Auth
+   370→| Method | Path | Purpose |
+   371→|---|---|---|
+   372→| POST | `/api/auth/callback/credentials` | NextAuth credentials sign-in. |
+   373→| GET/POST | `/api/auth/*` | NextAuth session / csrf / signout handlers. |
+   374→
+   375→---
+   376→
+   377→## 6A. AI Auto-Fill Architecture (VLM Provider Abstraction)
+   378→
+   379→The "Auto-fill from PDF" feature reads an uploaded SDS PDF using a vision-language
+   380→model (VLM) and returns structured JSON fields. The provider is swappable via the
+   381→`AI_PROVIDER` env var so the same code works on the sandbox (free in-house AI) and
+   382→on a local machine (free Google Gemini tier).
+   383→
+   384→### Request flow
+   385→
+   386→```
+   387→Admin UI (chemical-manager.tsx)
+   388→  └─ user clicks "Auto-fill from PDF", selects a .pdf file
+   389→  └─ POST /api/admin/sds/extract  (multipart: file=...)
+   390→       │
+   391→       ├─ requireAdmin()                          ← server-side authz
+   392→       ├─ validate file (magic bytes %PDF- + MIME + .pdf + size)
+   393→       ├─ assertProviderConfigured(provider)      ← fail fast if key missing
+   394→       ├─ rasterizePdfToPngs(buffer, {maxPages:5, scale:2})   ← src/lib/pdf-rasterize.ts
+   395→       │     └─ pdfjs-dist + @napi-rs/canvas (pure JS, no Poppler)
+   396→       ├─ callVlm(pageImages, EXTRACTION_PROMPT)  ← src/lib/ai-vlm.ts
+   397→       │     ├─ AI_PROVIDER=zai       → z-ai-web-dev-sdk (glm-4.6v)   [sandbox default]
+   398→       │     ├─ AI_PROVIDER=gemini    → @google/generative-ai (gemini-3.6-flash)
+   399→       │     ├─ AI_PROVIDER=openai    → openai SDK (gpt-4o-mini)
+   400→       │     └─ AI_PROVIDER=anthropic → @anthropic-ai/sdk (claude-3-5-sonnet)
+   401→       ├─ extractJson(rawResponse)                 ← strip markdown fences
+   402→       ├─ JSON.parse + sanitize (enum filter, trim, dedupe)
+   403→       └─ return { success: true, data: {…15 fields…} }
+   404→  └─ frontend merges fields into the chemical form (preserves the manual `id` field)
+   405→```
+   406→
+   407→### Provider selection (`src/lib/ai-vlm.ts`)
+   408→
+   409→| `AI_PROVIDER` | SDK package | Default model | Where it works |
+   410→|---|---|---|---|
+   411→| `zai` (default) | `z-ai-web-dev-sdk` (pre-installed) | `glm-4.6v` | **Z.ai sandbox only** — auto-configured via `/etc/.z-ai-config`. Does NOT work on a local machine. |
+   412→| `gemini` | `@google/generative-ai` (pre-installed, v0.24.1) | `gemini-3.6-flash` | Local dev / production. Free tier: 1,500 req/day. |
+   413→| `openai` | `openai` (NOT installed — `bun add openai`) | `gpt-4o-mini` | Local dev / production. Paid. |
+   414→| `anthropic` | `@anthropic-ai/sdk` (NOT installed — `bun add @anthropic-ai/sdk`) | `claude-3-5-sonnet-20241022` | Local dev / production. Paid. |
+   415→
+   416→### Gemini configuration (verified)
+   417→
+   418→| Item | Value |
+   419→|---|---|
+   420→| SDK | `@google/generative-ai` v0.24.1 (installed, pre-built into `node_modules`) |
+   421→| API endpoint | `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` (hardcoded in SDK as `DEFAULT_API_VERSION = "v1beta"`) |
+   422→| **Default model** | **`gemini-3.6-flash`** — hardcoded in `src/lib/ai-vlm.ts` line 270 as the fallback when `GEMINI_MODEL` is not set. Confirmed real and served by the current API. |
+   423→| Override | Set `GEMINI_MODEL=<model>` in `.env` to use a different model. Do NOT use retired models (see below). |
+   424→| Safety settings | All 4 categories set to `BLOCK_NONE` — SDS documents contain hazard words ("carcinogen", "fatal") that would otherwise trigger filters and silently blank the response. |
+   425→| Output mode | `responseMimeType: "application/json"` — forces valid JSON output, no markdown fences to strip. |
+   426→| **Retired models** | `gemini-1.5-flash`, `gemini-1.5-pro`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-2.0-pro`, `gemini-2.5-flash`, `gemini-2.5-pro` — all return 404 "model is no longer available". |
+   427→
+   428→### Required environment variables (Gemini)
+   429→
+   430→| Variable | Required? | Purpose |
+   431→|---|---|---|
+   432→| `AI_PROVIDER` | Yes (to use Gemini) | Set to `gemini`. Defaults to `zai` if unset. |
+   433→| `GEMINI_API_KEY` | Yes (when `AI_PROVIDER=gemini`) | Google AI Studio API key. Get one free at https://aistudio.google.com/apikey. NEVER commit this. |
+   434→| `GEMINI_MODEL` | No | Override the default `gemini-3.6-flash`. Only set if you need a different currently-served model. |
+   435→
+   436→### Error handling (`src/lib/ai-vlm.ts`)
+   437→
+   438→| Error class | Thrown when | HTTP status returned by extract route |
+   439→|---|---|---|
+   440→| `AiConfigError` | Provider API key missing, or SDK package not installed, or (zai) config file not found. | 503 |
+   441→| `AiRequestError` | The API call itself failed (network, auth, rate limit, 404 model not found). Carries `.status` from the upstream API. | 502 (or the upstream status if 4xx/5xx) |
+   442→
+   443→The extract route (`src/app/api/admin/sds/extract/route.ts`) catches both, returns a JSON `{ success: false, error: "…" }` body, and never exposes the API key or raw request payload to the client.
+   444→
+   445→### Local development setup (Gemini)
+   446→
+   447→```bash
+   448→# 1. Get a free key:  https://aistudio.google.com/apikey
+   449→# 2. Add to .env:
+   450→AI_PROVIDER=gemini
+   451→GEMINI_API_KEY=your_real_key_here
+   452→# GEMINI_MODEL is optional — defaults to gemini-3.6-flash
+   453→# 3. Restart:
+   454→bun run dev
+   455→```
+   456→
+   457→The `@google/generative-ai` package is already in `package.json` — no `bun add` needed.
+   458→
+   459→### Where the AI code lives
+   460→
+   461→| File | Role |
+   462→|---|---|
+   463→| `src/lib/ai-vlm.ts` | Provider abstraction: `resolveProvider()`, `assertProviderConfigured()`, `callVlm()`, and per-provider functions `callZai()`, `callGemini()`, `callOpenai()`, `callAnthropic()`. |
+   464→| `src/lib/pdf-rasterize.ts` | PDF → PNG conversion (pdfjs-dist + @napi-rs/canvas). Returns `Buffer[]` (one per page, max 5). |
+   465→| `src/app/api/admin/sds/extract/route.ts` | The API endpoint. Validates file, calls rasterize + callVlm, parses + sanitizes response. |
+   466→| `src/components/admin/chemical-manager.tsx` | Frontend: the "Auto-fill from PDF" button + form-merge logic. |
+   467→| `src/types/ai-providers.d.ts` | TypeScript module declarations for the optional (not-pre-installed) `openai` and `@anthropic-ai/sdk` packages. |
+   468→
+   469→---
+   470→
+   471→## 7. Sync Engine (`src/lib/sync-engine.ts`)
+   472→
+   473→### Trigger points
+   474→1. **App startup** — fires once Dexie is initialized.
+   475→2. **Offline → online transition** — `use-online-status` hook notifies the engine.
+   476→3. **Periodic** — runs every few minutes while online.
+   477→
+   478→### Algorithm
+   479→```
+   480→1. Acquire mutex (in Dexie.syncMeta) — prevents concurrent syncs across tabs.
+   481→2. Read lastSyncTimestamp from syncMeta.
+   482→3. GET /api/sync?since=<lastSyncTimestamp>.
+   483→4. For each chemical in response:
+   484→   - If deleted (deletedAt > since) → remove from Dexie.chemicals.
+   485→   - Else → upsert into Dexie.chemicals.
+   486→5. For each sdsDocument in response:
+   487→   - Upsert metadata into Dexie.sdsDocuments.
+   488→   - Compare version with Dexie.sdsBlobs.
+   489→     - If version unchanged AND blob exists → skip (no re-download).
+   490→     - If version changed OR blob missing → GET /api/sds/[id]/download,
+   491→       store Blob in Dexie.sdsBlobs with new version.
+   492→6. Persist new lastSyncTimestamp = response.serverTime.
+   493→7. Release mutex. Update Zustand sync status.
+   494→```
+   495→
+   496→### Rate limiting
+   497→A minimum interval between sync attempts prevents hammering the server on flaky connections. Manual retry from the UI bypasses the interval once.
+   498→
+   499→### Status states (the `SyncStatus` type)
+   500→| State | Meaning |
+   501→|---|---|
+   502→| `offline` | Navigator reports offline. No sync attempts. |
+   503→| `syncing` | A sync is in progress. |
+   504→| `synced` | Last sync completed successfully and we're online. |
+   505→| `local-changes` | *(reserved)* user has local-only changes that couldn't be pushed (currently preferences only — always local). |
+   506→| `error` | Last sync attempt failed. UI shows a retry button. |
+   507→
+   508→### Conflict resolution
+   509→- **Chemical / SDS data:** server-wins. The latest `updatedAt` always wins.
+   510→- **User preferences / favorites / notes:** local-only, never synced, never overwritten.
+   511→
+   512→---
+   513→
+   514→## 8. Security Model
+   515→
+   516→### Authentication
+   517→- NextAuth Credentials provider.
+   518→- Passwords hashed with **bcrypt (12 rounds)** — never stored or logged in plaintext.
+   519→- JWT session strategy, 30-day max age.
+   520→- Cookies: `httpOnly`, `sameSite=lax`, `secure` in production (`__Secure-` prefix).
+   521→
+   522→### Authorization (defense in depth)
+   523→1. **Edge middleware** (`src/middleware.ts`) — blocks `/admin/*` (except `/admin/login`) unless the JWT has `role === "ADMIN"`. Fast, runs at the edge.
+   524→2. **Server-side guard** (`requireAdmin()` in `src/lib/session.ts`) — every admin API route calls this. Returns 401 if no valid admin session. This is the real enforcement layer; the middleware is just a UX optimization / defense-in-depth.
+   525→
+   526→### SDS file upload safety
+   527→- **Magic-byte validation** — the file must start with `%PDF-` (PDF signature). Renamed non-PDFs are rejected.
+   528→- **MIME type check** — must be `application/pdf`.
+   529→- **Extension check** — must end in `.pdf`.
+   530→- **Size limit** — enforced (see `validation.ts`).
+   531→- **Filename handling** — user-supplied filename is stored only for display/download. The actual stored file is named `<uuid>.pdf` under `storage/`. No path traversal possible.
+   532→- **No path exposure** — `storageKey` is a UUID, never the original path.
+   533→
+   534→### Input validation
+   535→- All admin chemical inputs validated with **zod** schemas before reaching Prisma.
+   536→- Prisma parameterizes all queries — no raw SQL, no SQL injection surface.
+   537→
+   538→### Security headers (`next.config.ts`)
+   539→- Content-Security-Policy
+   540→- X-Frame-Options: DENY
+   541→- X-Content-Type-Options: nosniff
+   542→- Referrer-Policy
+   543→- Strict-Transport-Security (HSTS)
+   544→- Permissions-Policy
+   545→
+   546→### Secrets
+   547→- `NEXTAUTH_SECRET` — required in production. Generate with:
+   548→  ```bash
+   549→  bun -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'
+   550→  ```
+   551→- `ADMIN_PASSWORD` — plaintext in `.env` only; hashed before DB storage.
+   552→- `.env` is gitignored. `.env.example` is the committed template.
+   553→
+   554→### Known platform-level caveat
+   555→The sandbox gateway (`Caddyfile`) uses an `XTransformPort` query param for port routing. This is an open-proxy-style SSRF surface at the **infra level** and is outside the application code. Flag for the platform team before any public deployment.
+   556→
+   557→---
+   558→
+   559→## 9. PWA Behavior
+   560→
+   561→- **Manifest** (`public/manifest.json`): standalone display, teal theme (`#0d9488`), icons for `any` + `maskable` at 192/512.
+   562→- **Service worker** (`public/sw.js`): vanilla, no Workbox.
+   563→  - Precaches app shell (`/`, manifest, icons).
+   564→  - Navigations: network-first with cache + app-shell fallback.
+   565→  - Static assets: stale-while-revalidate.
+   566→  - SDS PDF responses: cached for offline reuse.
+   567→- **Registration** (`src/components/common/service-worker-register.tsx`): production-only to avoid dev caching churn.
+   568→- **Installability:** after a production build, the app is installable on Android/Chrome/iOS.
+   569→
+   570→---
+   571→
+   572→## 10. Commands
+   573→
+   574→### Development
+   575→```bash
+   576→bun run dev          # Start dev server on port 3000 (Turbopack), logs to dev.log
+   577→bun run lint         # ESLint
+   578→```
+   579→
+   580→### Database
+   581→```bash
+   582→bun run db:push      # Push schema to SQLite (accept-data-loss on schema conflicts)
+   583→bun run db:generate  # Regenerate Prisma Client
+   584→bun run db:migrate   # Create + apply a migration (dev)
+   585→bun run db:reset     # Drop + recreate (dev — destroys data)
+   586→bun run db:seed      # Create admin from .env + migrate 14 chemicals into Prisma DB
+   587→```
+   588→
+   589→### Production
+   590→```bash
+   591→bun run build        # next build + copy static + public into standalone
+   592→bun run start        # Run the standalone server (NODE_ENV=production)
+   593→```
+   594→
+   595→> **Note:** In this sandbox, do **not** run `bun run build`. Use `bun run dev` only. The preview panel serves the dev server.
+   596→
+   597→---
+   598→
+   599→## 11. First-Time Setup (Fresh Clone)
+   600→
+   601→> **See [Section 0 — Quick Start](#0-quick-start--how-to-run-this-project) above** for the complete, step-by-step guide including prerequisites, the `npm` → `bun` migration path, and common error fixes.
+   602→
+   603→The short version:
+   604→
+   605→```bash
+   606→bun install            # NOT npm install
+   607→cp .env.example .env   # then edit .env (set ADMIN_PASSWORD + NEXTAUTH_SECRET)
+   608→bun run db:push        # create SQLite tables
+   609→bun run db:seed        # create admin + 14 chemicals
+   610→bun run dev            # start on http://localhost:3000
+   611→```
+   612→
+   613→---
+   614→
+   615→## 12. Testing Checklist
+   616→
+   617→### Auth
+   618→- [ ] `/admin/login` renders the sign-in form.
+   619→- [ ] Wrong password → "Invalid email or password" error.
+   620→- [ ] Correct credentials → redirect to `/admin`.
+   621→- [ ] Unauthenticated `GET /api/admin/dashboard` → 401.
+   622→- [ ] `/admin/*` (except `/admin/login`) redirects to `/admin/login` when not signed in.
+   623→- [ ] Sign out clears the session and returns to login.
+   624→
+   625→### Chemical CRUD (admin)
+   626→- [ ] Create a new chemical → appears in dashboard and public catalog after sync.
+   627→- [ ] Edit a chemical → change is reflected on devices after sync.
+   628→- [ ] Delete a chemical → disappears from public catalog after sync.
+   629→- [ ] All inputs validated (zod rejects malformed payloads).
+   630→
+   631→### SDS lifecycle (admin)
+   632→- [ ] New chemical gets an auto placeholder SDS (`status = placeholder`).
+   633→- [ ] Upload a real PDF → `status = available`, `version` increments.
+   634→- [ ] Upload a non-PDF (e.g. `.docx` renamed) → rejected.
+   635→- [ ] Upload a file with wrong extension → rejected.
+   636→- [ ] Upload an oversized file → rejected.
+   637→- [ ] View PDF → opens in new tab.
+   638→- [ ] Download PDF → downloads original.
+   639→- [ ] Revert to placeholder → `status = placeholder`, `version` increments, file removed from storage.
+   640→
+   641→### Sync (public PWA)
+   642→- [ ] On first load with empty Dexie → full initial sync pulls all 14 chemicals.
+   643→- [ ] `GET /api/sync?since=0` returns all records.
+   644→- [ ] `GET /api/sync?since=<recent>` returns only deltas.
+   645→- [ ] Make an admin edit → on next periodic sync the public catalog updates.
+   646→- [ ] Toggle device offline → sync status shows `offline`, no sync attempts.
+   647→- [ ] Toggle device back online → sync fires automatically.
+   648→- [ ] SDS PDF only re-downloads when its version changes (inspect `sdsBlobs` in DevTools → Application → IndexedDB).
+   649→- [ ] SDS PDF opens offline (after first online fetch).
+   650→- [ ] Manual retry button works after a simulated error.
+   651→
+   652→### PWA
+   653→- [ ] Manifest valid (Chrome DevTools → Application → Manifest).
+   654→- [ ] Service worker registered in production build.
+   655→- [ ] App shell loads offline after first visit.
+   656→- [ ] Installable on mobile (production build).
+   657→
+   658→### Security
+   659→- [ ] Security headers present in response (check with `curl -I` or browser DevTools).
+   660→- [ ] Cookies are `httpOnly` and (in prod) `Secure` + `__Secure-` prefix.
+   661→- [ ] `.env` is gitignored (`git status` shows it as ignored).
+   662→- [ ] No plaintext passwords in the DB (`SELECT email, passwordHash FROM User` — hash only).
+   663→- [ ] SDS file paths on disk are UUIDs, not user-supplied names.
+   664→
+   665→---
+   666→
+   667→## 13. Extending the System
+   668→
+   669→### Add a new chemical field
+   670→1. Add the field to `prisma/schema.prisma` → `Chemical` model.
+   671→2. `bun run db:push`.
+   672→3. Update the zod schema in `src/lib/validation.ts`.
+   673→4. Update the serialization in `src/lib/serialize.ts`.
+   674→5. Update the Dexie `ChemicalRecord` type in `src/types/index.ts`.
+   675→6. Update the admin chemical form (`src/components/admin/chemical-manager.tsx`).
+   676→7. Update the public detail view (`src/components/detail/chemical-detail.tsx`) if user-facing.
+   677→
+   678→### Add a new admin role (e.g. `EDITOR`)
+   679→1. Update the `role` check in `src/lib/auth.ts` (`authorize`) and `src/middleware.ts`.
+   680→2. Add role-based checks in API routes as needed.
+   681→3. Update the NextAuth type augmentation in `src/types/next-auth.d.ts`.
+   682→
+   683→### Change the sync interval
+   684→Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hooks/use-sync.ts`).
+   685→
+   686→---
+   687→
+   688→## 14. Troubleshooting (Developer)
+   689→
+   690→| Symptom | Cause | Fix |
+   691→|---|---|---|
+   692→| `PrismaClientInitializationError` | DB file missing or path wrong | Check `DATABASE_URL` in `.env`; run `bun run db:push` |
+   693→| `bun run db:seed` does nothing | Admin already exists with same email | It's idempotent — it upserts. Check `SELECT * FROM User`. |
+   694→| 401 on every admin API even when "logged in" | Session cookie not sent (cross-origin / different port) | Ensure requests use relative paths; in this sandbox use `XTransformPort` for cross-service calls |
+   695→| SDS upload 413 | File too large | Check the size limit in `src/lib/validation.ts` / reverse proxy |
+   696→| Dexie schema version conflict | Old client DB version | Bump Dexie schema version in `src/lib/local-db.ts` with an upgrade function |
+   697→| Service worker not updating | Old SW cached | Bump `CACHE_VERSION` in `public/sw.js`; user will get new SW on next load |
+   698→| Preview shows blank "Z" screen | Dev server not running | `bun run dev` (this is the most common "it's loading" report) |
+   699→
+   700→---
+   701→
+   702→## 15. Project Status
+   703→
+   704→The implementation is **complete and verified**:
+   705→- 14 chemicals seeded into the Prisma backend.
+   706→- Public PWA renders all chemicals, search, filters, detail, emergency mode.
+   707→- Admin login + dashboard (Overview / Chemicals / SDS) functional.
+   708→- Delta sync API returns correct deltas; client sync engine runs on startup / online / periodic.
+   709→- SDS PDF upload validates files (magic bytes + MIME + extension + size).
+   710→- SDS PDFs cached client-side in IndexedDB for offline viewing.
+   711→- Security headers configured; `.env` gitignored; admin auth server-side enforced.
+   712→- TypeScript strict: 0 errors. ESLint: 0 errors.
+   713→- **AI auto-fill** works with the default `zai` provider on the Z.ai sandbox (verified end-to-end via Agent Browser). The `gemini` provider code path is API-compatible with the installed `@google/generative-ai` v0.24.1 SDK; live verification against Google's API requires a real `GEMINI_API_KEY` in `.env` (not present in the sandbox).
+   714→
+   715→For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
+   716→
+   717→---
+   718→
+   719→## 16. Anti-Hallucination Reference
+   720→
+   721→> **Purpose:** This section exists so future AI agents (and developers) have a single source of truth about what is actually in the codebase. If the docs and the code ever disagree, **the code is the truth** — update the docs.
+   722→
+   723→### CURRENTLY IMPLEMENTED (verified in code)
+   724→
+   725→| Feature | Where | Notes |
+   726→|---|---|---|
+   727→| Offline-first PWA (Dexie/IndexedDB cache) | `src/lib/local-db.ts`, `src/lib/sync-engine.ts` | Client reads from Dexie; writes are local-only for prefs. |
+   728→| Prisma + SQLite backend (source of truth) | `prisma/schema.prisma`, `src/lib/db.ts` | 3 models: `User`, `Chemical`, `SdsDocument`. |
+   729→| NextAuth.js v4 (Credentials, JWT, bcrypt 12 rounds) | `src/lib/auth.ts`, `src/app/api/auth/` | `role=ADMIN` gate in `authorize()`. |
+   730→| Admin dashboard at `/admin` (Overview/Chemicals/SDS tabs) | `src/app/admin/`, `src/components/admin/` | Edge middleware + `requireAdmin()` server-side guard. |
+   731→| Delta sync API (`GET /api/sync?since=<ms>`) | `src/app/api/sync/route.ts` | Public, returns chemicals + SDS metadata deltas. |
+   732→| SDS PDF upload (magic-byte + MIME + ext + size validation) | `src/app/api/admin/sds/route.ts`, `src/lib/storage.ts`, `src/lib/validation.ts` | UUID storage keys, no path traversal. |
+   733→| SDS PDF download (streamed, version-cached client-side) | `src/app/api/sds/[id]/download/route.ts` | `Cache-Control: no-store` server-side; IndexedDB Blob cache client-side. |
+   734→| **AI auto-fill from PDF** (VLM extraction) | `src/app/api/admin/sds/extract/route.ts`, `src/lib/ai-vlm.ts`, `src/lib/pdf-rasterize.ts` | Provider-agnostic: `zai` / `gemini` / `openai` / `anthropic`. Default `zai` (sandbox). |
+   735→| **Gemini provider** (`@google/generative-ai` v0.24.1) | `src/lib/ai-vlm.ts` → `callGemini()` | Default model `gemini-3.6-flash` (hardcoded line 270). SDK pre-installed. BLOCK_NONE safety, JSON output mode. |
+   736→| PDF rasterization (pure JS, no Poppler) | `src/lib/pdf-rasterize.ts` | `pdfjs-dist` + `@napi-rs/canvas`. Max 5 pages, scale 2.0 (~150 DPI). |
+   737→| Security headers (CSP, HSTS, X-Frame-Options DENY, etc.) | `next.config.ts` | |
+   738→| Service worker (vanilla, production-only) | `public/sw.js`, `src/components/common/service-worker-register.tsx` | App-shell precache + SWR for assets. Disabled in dev. |
+   739→| GHS pictograms (9 inline SVGs) | `src/components/ghs/pictograms.tsx` | |
+   740→| Emergency mode (full-screen, offline, context-aware FAB) | `src/components/emergency/` | |
+   741→| Dark mode (next-themes) | `src/components/common/theme-provider.tsx` | |
+   742→
+   743→### PLANNED (discussed but NOT implemented)
+   744→
+   745→| Feature | Source | Status |
+   746→|---|---|---|
+   747→| AI-powered chatbot for chemical/SDS queries | `aug12-meeting.md` §1 (Mr. Casila suggestion) | **Not started.** Discussed at the August 12 meeting as a potential future enhancement. No code exists. |
+   748→| Excel bulk chemical import | `ADMIN_GUIDE.md` §4.4 ("A future Excel bulk-import feature is planned") | **Not started.** No code, no API route, no UI. |
+   749→| Per-division admin roles / focal persons | `aug12-meeting.md` §4 | **Not started.** Only a single `ADMIN` role exists. |
+   750→| Regulatory tag display (DENR-EMB / PNP / PDEA) | `aug12-meeting.md` §3.2 | **Partially present.** The `regulatoryTags` field exists in the Prisma schema and Chemical type, and a `RegulatoryTags` component exists. See "Unknown" below. |
+   751→
+   752→### DEPRECATED / RETIRED (do not use)
+   753→
+   754→| Item | Why | Replace with |
+   755→|---|---|---|
+   756→| `gemini-1.5-flash`, `gemini-1.5-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+   757→| `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-2.0-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+   758→| `gemini-2.5-flash`, `gemini-2.5-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+   759→| `@google/generative-ai` older versions (< 0.24.0) | Missing `responseMimeType` support | v0.24.1 (currently installed) |
+   760→| `pdftoppm` / Poppler system dependency | Replaced by pure-JS renderer | `pdfjs-dist` + `@napi-rs/canvas` (`src/lib/pdf-rasterize.ts`) |
+   761→| Old Dexie-only architecture (no backend) | Described in outdated `README.md` (pre-backend era) | Current: Prisma + SQLite backend + Dexie client cache + delta sync. See §2. |
+   762→| `npm install` / `npm run dev` | Use Bun — `db:seed` is TypeScript | `bun install` + `bun run dev` |
+   763→
+   764→### UNKNOWN / REQUIRES VERIFICATION
+   765→
+   766→| Item | What we know | What we don't |
+   767→|---|---|---|
+   768→| `regulatoryTags` field | Exists in Prisma schema (`Chemical.regulatoryTags`), in the TypeScript types, and a `RegulatoryTags.tsx` component renders them. The seed data includes empty arrays for all 14 chemicals. | Whether the August 12 meeting's request (DENR-EMB / PNP / PDEA classification tags) is fully wired up — the field exists but may need population logic and admin UI. Not verified end-to-end. |
+   769→| Gemini 3.6 free-tier quota | Code comment and `.env.example` say "1,500 requests/day". | This quota is set by Google and may change. Verify at https://ai.google.dev/pricing before relying on it. |
+   770→| Live Gemini API response | SDK wiring is verified (import + `getGenerativeModel` + `generateContent` all callable, `BLOCK_NONE` + `responseMimeType` accepted by the SDK). | No real `GEMINI_API_KEY` is present in the sandbox `.env`, so the actual end-to-end Gemini request/response has not been tested in this environment. The `zai` provider (sandbox default) HAS been tested end-to-end. |
+   771→| `@tanstack/react-query` dependency | Listed in `package.json` (^5.82.0). | **Zero imports found** in `src/`. It is a dead dependency — installed but unused. Safe to remove in a future cleanup, but left in place to avoid breaking the running app. |
+   772→| Committed SQLite DB at `prisma/db/custom.db` | Present in the repo (from the original ZIP). Contains a bcrypt admin hash. | Whether this is intentional (for dev convenience) or an accidental commit. The live sandbox uses a fresh DB at `db/custom.db` (different path). The `.gitignore` does NOT cover `prisma/db/*.db` (only `/db/*.db` root-anchored). |
+   773→
+   774→### Documentation vs. code — how to resolve disagreements
+   775→
+   776→1. **The code is always the truth.** If a doc says X but the code does Y, the doc is wrong.
+   777→2. **Verify in the code** before trusting any doc claim about: model names, env var names, API routes, file locations, database fields.
+   778→3. **Update the doc** to match the code. Do not change the code to match a stale doc unless explicitly asked.
+   779→4. **Never assume a model / API / package exists** without checking the installed version or the code's actual import.
+   780→

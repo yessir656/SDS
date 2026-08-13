@@ -171,8 +171,8 @@ bun run dev
 ┌───────────────┴─────────────────────────────────────────────────┐
 │                    ADMIN UI  (/admin)                           │
 │  /admin/login   sign-in form                                    │
-│  /admin         dashboard: Overview / Chemicals / SDS tabs      │
-│  Protected by src/middleware.ts (edge, role=ADMIN)              │
+│  /admin         dashboard: 6 tabs (last 3 SUPER_ADMIN-only)     │
+│  Protected by src/middleware.ts (edge, role=SUPER_ADMIN||ADMIN)   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -252,10 +252,12 @@ src/components/
 
 ### Other
 ```
-prisma/schema.prisma      User · Chemical · SdsDocument
-src/middleware.ts         Edge-level /admin/* protection (role=ADMIN)
+prisma/schema.prisma      User (3-tier role) · Chemical · SdsDocument · AuditLog
+src/lib/audit.ts         logAction() + auditContext() — fire-and-forget audit helper
+src/lib/session.ts       requireAdmin() + requireSuperAdmin() server-side guards
+src/middleware.ts         Edge-level /admin/* protection (role=SUPER_ADMIN || ADMIN)
 src/types/index.ts        Domain types (ChemicalRecord, GhsPictogram, HazardClass, SyncStatus, ...)
-src/types/next-auth.d.ts  Augments NextAuth session/token with `role`
+src/types/next-auth.d.ts  Augments NextAuth session/token with `role` + `passwordChangeRequired`
 src/store/app-store.ts    Zustand: view routing, search/filter, sync status
 src/hooks/                use-sync, use-database-ready, use-online-status, use-mobile, use-toast
 
@@ -284,9 +286,12 @@ next.config.ts            Security headers (CSP, HSTS, X-Frame-Options, ...), re
 | email | String | unique |
 | passwordHash | String | bcrypt (12 rounds) |
 | name | String? | optional display name |
-| role | String | `"ADMIN"` or `"USER"` (only ADMIN can log in) |
+| role | String | `"SUPER_ADMIN"` \| `"ADMIN"` \| `"USER"` (only SUPER_ADMIN and ADMIN can sign in; USER is reserved for the public PWA and cannot log in here) |
+| disabled | Boolean | default `false` — super-admin can disable an account without deleting it (also blocks sign-in via `authorize()`) |
+| passwordChangeRequired | Boolean | default `false` — when `true`, the user is forced to `/admin/change-password` on next login (triple-layered enforcement — see §8) |
+| lastLoginAt | DateTime? | updated on each successful sign-in |
 | createdAt / updatedAt | DateTime | |
-| Relations | `SdsDocument[] uploadedSds`, `Chemical[] updatedChemicals` | audit trail |
+| Relations | `SdsDocument[] uploadedSds`, `Chemical[] updatedChemicals`, `AuditLog[] auditLogs` | audit trail |
 
 ### `Chemical` — central catalog entity
 | Field | Type | Notes |
@@ -327,6 +332,26 @@ Indexes: `updatedAt`, `deletedAt`, `chemicalName`, `casNumber`.
 
 Indexes: `updatedAt`, `status`.
 
+### `AuditLog` — append-only trail of every administrative mutation
+| Field | Type | Notes |
+|---|---|---|
+| id | String (cuid) | PK |
+| actorId | String? | FK → User, nullable (null for system actions). `onDelete: SetNull` so the log row survives user deletion. |
+| actorEmail | String? | Denormalized email — same reason: log survives user deletion. |
+| action | String | Dotted convention, e.g. `chemical.create`, `chemical.update`, `chemical.delete`, `sds.upload`, `sds.replace`, `sds.revert`, `user.create`, `user.update`, `user.disable`, `user.delete`, `user.password-change`, `system.test-ai`. |
+| entityType | String | `"chemical"` \| `"sds"` \| `"user"` \| `"session"` \| `"system"`. |
+| entityId | String | id of the affected entity (or the provider name for `system.*`). |
+| summary | String | Human-readable one-liner shown in the audit-log viewer. |
+| before | String? | JSON snapshot of state before the mutation (for updates/deletes). |
+| after | String? | JSON snapshot of state after the mutation (for creates/updates). |
+| ipAddress | String? | Best-effort client IP from `x-forwarded-for` / `x-real-ip`. |
+| createdAt | DateTime | default `now()`. |
+| Relations | `User? actor` | nullable; `onDelete: SetNull`. |
+
+Indexes: `createdAt`, `actorId`, `[entityType, entityId]`, `action`.
+
+Entries are written via `logAction()` in `src/lib/audit.ts` (fire-and-forget — failures are logged to stderr and never propagate to the caller). The viewer (`src/components/admin/audit-log-viewer.tsx`) is cursor-paginated and exposed at `GET /api/admin/audit` (SUPER_ADMIN only).
+
 ---
 
 ## 5. Client Database (Dexie v2)
@@ -365,6 +390,22 @@ preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
 | POST | `/api/admin/sds` | Upload / replace SDS PDF. Multipart form. Validates magic bytes + MIME + extension + size. Stores with UUID filename. Increments `version`, sets `status = available`. |
 | DELETE | `/api/admin/sds/[id]` | Revert to placeholder. Removes the uploaded file, resets `status = placeholder`, increments `version`. |
 | POST | `/api/admin/sds/extract` | **AI auto-fill.** Accepts an SDS PDF (multipart), rasterizes first 5 pages to PNG, sends to the configured VLM provider (`src/lib/ai-vlm.ts`), parses + sanitizes the JSON response, returns `{ success, data }`. 60s timeout. See §6A. |
+
+### Super-admin only (`requireSuperAdmin()`)
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/admin/users` | List all admin accounts (SUPER_ADMIN + ADMIN). `passwordHash` is never included in the response. |
+| POST | `/api/admin/users` | Create admin. Zod-validated body: `email`, `password` (≥8 chars), `name?`, `role` (`ADMIN` \\| `SUPER_ADMIN`, default `ADMIN`), `passwordChangeRequired` (default `true`). Returns 409 on duplicate email. Audit-logs `user.create`. |
+| PATCH | `/api/admin/users/[id]` | Update `name` / `role` / `disabled` / `password` / `passwordChangeRequired`. At least one field required. **Lockout guards**: cannot change own role away from `SUPER_ADMIN`; cannot disable self; cannot disable / downgrade / delete the last active super-admin. Resetting a password implicitly sets `passwordChangeRequired=true` unless the same PATCH explicitly sets it to `false`. Audit-logs `user.update` (or `user.disable` when `disabled: true` is set). |
+| DELETE | `/api/admin/users/[id]` | Permanently delete admin. Same lockout guards as PATCH (cannot delete self; cannot delete last active super-admin). Audit-logs `user.delete`. |
+| GET | `/api/admin/audit?cursor=&limit=&entityType=&action=&actorId=` | Cursor-paginated audit log (newest first). Defaults: `limit=50`, max `100`. `cursor` is the ISO timestamp of the last row on the previous page. Fetches `limit+1` rows to detect `hasMore`; returns `{ entries, nextCursor, hasMore }`. Filters are all optional: `entityType`, `action` (matched as a **prefix** — e.g. `action=user.`), `actorId`. |
+| GET | `/api/admin/system/info` | Returns 5 read-only info blocks: **ai** (provider config from `getProviderInfo()` — masked key, never the actual key), **storage** (walks `storage/sds/` for totalBytes / fileCount / largestFile / averageBytes), **database** (SQLite file size + path + `DATABASE_URL`), **sync** (chemical/SDS/user/auditLog counts + `lastUpdatedAt` + `maxServerVersion` — 7 parallel DB queries), **system** (`nodeVersion`, `platform`, `arch`, `environment`, `nextjsVersion`, `uptimeSeconds`, `currentTime`, `timezone`). |
+| POST | `/api/admin/system/test-ai` | Calls `testProviderConnection()` — sends a minimal text-only prompt (`'Reply with exactly the JSON: {"ok":true}'`) to the configured VLM provider. Returns `{ ok, provider, model, latencyMs, responsePreview, error? }`. **Never sends an image, never touches the DB.** Audit-logs as `system.test-ai` with the result + latency in the `after` snapshot. |
+
+### Any authenticated admin (used by the password-change flow)
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/admin/change-password` | Body: `{ currentPassword, newPassword }`. Verifies `currentPassword` against the user's bcrypt hash, rejects if `newPassword === currentPassword`, hashes the new password, updates the DB (`passwordHash` + `passwordChangeRequired=false`), audit-logs `user.password-change`. **Uses `getServerSession` directly (NOT `requireAdmin()`)** so that users with `passwordChangeRequired === true` can still call it — this is the one API route that bypasses the password-change gate. |
 
 ### Auth
 | Method | Path | Purpose |
@@ -515,13 +556,33 @@ A minimum interval between sync attempts prevents hammering the server on flaky 
 
 ### Authentication
 - NextAuth Credentials provider.
+- **3-tier role hierarchy**: `SUPER_ADMIN` > `ADMIN` > `USER`. Only `SUPER_ADMIN` and `ADMIN` can sign in to `/admin/*`; `USER` is reserved for the public PWA and is rejected by `authorize()`.
+- Disabled accounts (`disabled === true`) cannot sign in.
 - Passwords hashed with **bcrypt (12 rounds)** — never stored or logged in plaintext.
-- JWT session strategy, 30-day max age.
+- JWT session strategy, 30-day max age. The JWT carries `id`, `role`, and `passwordChangeRequired`; the `session` callback copies them onto `session.user`.
+- On `useSession().update()` (trigger `"update"`), the `jwt` callback re-fetches `passwordChangeRequired` + `role` from the DB so a just-completed password change is reflected without a fresh sign-in.
 - Cookies: `httpOnly`, `sameSite=lax`, `secure` in production (`__Secure-` prefix).
 
 ### Authorization (defense in depth)
-1. **Edge middleware** (`src/middleware.ts`) — blocks `/admin/*` (except `/admin/login`) unless the JWT has `role === "ADMIN"`. Fast, runs at the edge.
-2. **Server-side guard** (`requireAdmin()` in `src/lib/session.ts`) — every admin API route calls this. Returns 401 if no valid admin session. This is the real enforcement layer; the middleware is just a UX optimization / defense-in-depth.
+1. **Edge middleware** (`src/middleware.ts`) — blocks `/admin/*` (except `/admin/login`) unless the JWT has `role === "SUPER_ADMIN" || role === "ADMIN"`. Fast, runs at the edge. (Super-admin-only routes enforce the stricter check server-side via `requireSuperAdmin()`.)
+2. **`requireAdmin()`** (in `src/lib/session.ts`) — every admin API route for chemicals / SDS / dashboard / change-password-adjacent features calls this. Returns 401 if the session is missing or the user is not `ADMIN` / `SUPER_ADMIN`. **Also returns 401 if the user has `passwordChangeRequired === true`** — defense-in-depth so a bypassed client guard still can't reach the API.
+3. **`requireSuperAdmin()`** (in `src/lib/session.ts`) — same shape as `requireAdmin()` but additionally requires `role === "SUPER_ADMIN"`. Used by user-management, audit-log, and system-settings routes. Also blocks `passwordChangeRequired` users.
+4. **`PasswordGuard`** client component (`src/components/admin/password-guard.tsx`) — mounted in the admin layout. Uses `useSession()` + `usePathname()`; if the current path is NOT `/admin/login` and NOT `/admin/change-password`, and the session has `passwordChangeRequired === true`, hard-redirects to `/admin/change-password`.
+
+### Audit log
+Every chemical / SDS / user / system mutation is logged via `logAction()` in `src/lib/audit.ts`.
+- **Fire-and-forget**: `logAction()` wraps its `db.auditLog.create()` in a `try/catch` and only logs to `stderr` on failure. An audit-log problem can **never** break the main operation the user is trying to perform.
+- **Captures**: `actorId`, `actorEmail` (denormalized so the row survives user deletion), `action` (dotted, e.g. `chemical.create`, `user.disable`, `system.test-ai`), `entityType`, `entityId`, `summary`, `before` / `after` JSON snapshots (built via `snapshotChemical()` for chemicals), and a best-effort `ipAddress` (from `x-forwarded-for` / `x-real-ip` via `auditContext()`).
+- **Storage**: `AuditLog` table (append-only — no update / delete endpoints exist). Indexed on `createdAt`, `actorId`, `[entityType, entityId]`, `action`.
+- **Viewer**: `GET /api/admin/audit` (SUPER_ADMIN only), cursor-paginated. UI: `src/components/admin/audit-log-viewer.tsx`.
+
+### Password change enforcement (triple-layered)
+When a super-admin creates a user with a temporary password (or resets an existing user's password), `passwordChangeRequired` is set to `true`. The user is then forced to change their password on next login via three independent layers:
+1. **Client-side guard** — `PasswordGuard` (`src/components/admin/password-guard.tsx`) redirects to `/admin/change-password` as soon as the session loads. Bypassing this is possible (disable JS), so it's UX + first line of defense only.
+2. **Server-side guard** — both `requireAdmin()` and `requireSuperAdmin()` return 401 when `passwordChangeRequired === true`. So a user with the flag set cannot call any admin API route except the change-password endpoint.
+3. **Verified current password** — `POST /api/admin/change-password` calls `getServerSession` directly (NOT `requireAdmin()`), verifies `currentPassword` against the bcrypt hash, rejects if `newPassword === currentPassword`, hashes the new password, sets `passwordChangeRequired=false`, and audit-logs `user.password-change`. The client then calls `useSession().update()` so the JWT refreshes without a fresh sign-in.
+
+The change-password route is the **only** admin API route that does not go through `requireAdmin()` / `requireSuperAdmin()` — by design, so the flag-bearer can still escape the gate.
 
 ### SDS file upload safety
 - **Magic-byte validation** — the file must start with `%PDF-` (PDF signature). Renamed non-PDFs are rejected.
@@ -676,9 +737,12 @@ bun run dev            # start on http://localhost:3000
 7. Update the public detail view (`src/components/detail/chemical-detail.tsx`) if user-facing.
 
 ### Add a new admin role (e.g. `EDITOR`)
-1. Update the `role` check in `src/lib/auth.ts` (`authorize`) and `src/middleware.ts`.
-2. Add role-based checks in API routes as needed.
-3. Update the NextAuth type augmentation in `src/types/next-auth.d.ts`.
+The three existing roles (`SUPER_ADMIN` / `ADMIN` / `USER`) are already wired through the entire stack — most features just need to call `requireAdmin()` or `requireSuperAdmin()`. To add a **4th** role:
+1. Update the role union type in `src/types/next-auth.d.ts` (it's currently `"SUPER_ADMIN" | "ADMIN" | "USER"` in all three of `Session.user`, `User`, and `JWT`).
+2. Update the `authorize()` check in `src/lib/auth.ts` (currently `user.role !== "SUPER_ADMIN" && user.role !== "ADMIN"`).
+3. Update the `authorized()` check in `src/middleware.ts` (currently `token?.role === "SUPER_ADMIN" || token?.role === "ADMIN"`).
+4. Add new `require<Role>` helpers in `src/lib/session.ts` as needed (mirroring the shape of `requireAdmin()` / `requireSuperAdmin()`) — including the `passwordChangeRequired` block for defense-in-depth.
+5. Add role-based checks (or zod enum extensions for `role` in `createUserSchema` / `updateUserSchema`) in the relevant API routes. The user-manager UI (`src/components/admin/user-manager.tsx`) also has a hard-coded role Select that may need the new option.
 
 ### Change the sync interval
 Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hooks/use-sync.ts`).
@@ -704,13 +768,18 @@ Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hoo
 The implementation is **complete and verified**:
 - 14 chemicals seeded into the Prisma backend.
 - Public PWA renders all chemicals, search, filters, detail, emergency mode.
-- Admin login + dashboard (Overview / Chemicals / SDS) functional.
+- Admin login + dashboard functional. The dashboard now has **6 tabs**: Overview / Chemicals / SDS Documents / Users / Audit Log / System. The last three are SUPER_ADMIN-only (conditionally rendered via `session.user.role === "SUPER_ADMIN"`).
 - Delta sync API returns correct deltas; client sync engine runs on startup / online / periodic.
 - SDS PDF upload validates files (magic bytes + MIME + extension + size).
 - SDS PDFs cached client-side in IndexedDB for offline viewing.
 - Security headers configured; `.env` gitignored; admin auth server-side enforced.
 - TypeScript strict: 0 errors. ESLint: 0 errors.
 - **AI auto-fill** works with the default `zai` provider on the Z.ai sandbox (verified end-to-end via Agent Browser). The `gemini` provider code path is API-compatible with the installed `@google/generative-ai` v0.24.1 SDK; live verification against Google's API requires a real `GEMINI_API_KEY` in `.env` (not present in the sandbox).
+- **3-tier role hierarchy** (`SUPER_ADMIN` > `ADMIN` > `USER`) wired through `prisma/schema.prisma`, `src/lib/auth.ts`, `src/lib/session.ts`, `src/middleware.ts`, and `src/types/next-auth.d.ts`. SUPER_ADMIN has full access incl. user management + audit log + system settings; ADMIN manages chemicals + SDS only; USER cannot sign in. Verified end-to-end via Agent Browser.
+- **User management** (CRUD admins) at `/api/admin/users` + `user-manager.tsx` component — SUPER_ADMIN only. Lockout prevention: cannot change own role from SUPER_ADMIN, cannot disable/delete self, cannot remove last active super-admin.
+- **Audit log** (append-only trail) — `AuditLog` Prisma model + `logAction()` helper + `/api/admin/audit` route + `audit-log-viewer.tsx` component. Every chemical/SDS/user/system mutation logged (fire-and-forget). Cursor-paginated viewer with entity-type + action-prefix filters and expandable before/after JSON detail rows.
+- **System Settings tab (Phase D)** at `/api/admin/system/info` + `/api/admin/system/test-ai` + `system-settings.tsx` component — SUPER_ADMIN only. 5 read-only info cards (AI provider, storage, database, sync, runtime) + a "Test Connection" button that calls `testProviderConnection()` and audit-logs `system.test-ai`.
+- **Password change on next login** — triple-layered enforcement (client `PasswordGuard` redirect + server `requireAdmin`/`requireSuperAdmin` 401 block + verified-current-password at `/api/admin/change-password`). JWT refreshed via `useSession().update()` after a successful change so no re-login is needed. Verified end-to-end via Agent Browser.
 
 For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
 
@@ -725,9 +794,9 @@ For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
 | Feature | Where | Notes |
 |---|---|---|
 | Offline-first PWA (Dexie/IndexedDB cache) | `src/lib/local-db.ts`, `src/lib/sync-engine.ts` | Client reads from Dexie; writes are local-only for prefs. |
-| Prisma + SQLite backend (source of truth) | `prisma/schema.prisma`, `src/lib/db.ts` | 3 models: `User`, `Chemical`, `SdsDocument`. |
-| NextAuth.js v4 (Credentials, JWT, bcrypt 12 rounds) | `src/lib/auth.ts`, `src/app/api/auth/` | `role=ADMIN` gate in `authorize()`. |
-| Admin dashboard at `/admin` (Overview/Chemicals/SDS tabs) | `src/app/admin/`, `src/components/admin/` | Edge middleware + `requireAdmin()` server-side guard. |
+| Prisma + SQLite backend (source of truth) | `prisma/schema.prisma`, `src/lib/db.ts` | 4 models: `User`, `Chemical`, `SdsDocument`, `AuditLog`. |
+| NextAuth.js v4 (Credentials, JWT, bcrypt 12 rounds) | `src/lib/auth.ts`, `src/app/api/auth/` | `role === "SUPER_ADMIN" \|\| role === "ADMIN"` gate in `authorize()` (3-tier role hierarchy). Disabled users + `USER` role rejected. JWT carries `id`, `role`, `passwordChangeRequired`. |
+| Admin dashboard at `/admin` (6 tabs) | `src/app/admin/`, `src/components/admin/` | Tabs: Overview / Chemicals / SDS Documents / Users / Audit Log / System. Last 3 are SUPER_ADMIN-only (conditionally rendered). Edge middleware + `requireAdmin()` / `requireSuperAdmin()` server-side guards. |
 | Delta sync API (`GET /api/sync?since=<ms>`) | `src/app/api/sync/route.ts` | Public, returns chemicals + SDS metadata deltas. |
 | SDS PDF upload (magic-byte + MIME + ext + size validation) | `src/app/api/admin/sds/route.ts`, `src/lib/storage.ts`, `src/lib/validation.ts` | UUID storage keys, no path traversal. |
 | SDS PDF download (streamed, version-cached client-side) | `src/app/api/sds/[id]/download/route.ts` | `Cache-Control: no-store` server-side; IndexedDB Blob cache client-side. |
@@ -739,6 +808,13 @@ For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
 | GHS pictograms (9 inline SVGs) | `src/components/ghs/pictograms.tsx` | |
 | Emergency mode (full-screen, offline, context-aware FAB) | `src/components/emergency/` | |
 | Dark mode (next-themes) | `src/components/common/theme-provider.tsx` | |
+| **3-tier role hierarchy** (`SUPER_ADMIN` > `ADMIN` > `USER`) | `prisma/schema.prisma`, `src/lib/auth.ts`, `src/lib/session.ts`, `src/middleware.ts`, `src/types/next-auth.d.ts` | SUPER_ADMIN has full access (user mgmt + audit log + system settings + chemicals + SDS); ADMIN manages chemicals + SDS only; USER cannot sign in. All three roles defined as a string union in the type augmentation. |
+| User management (CRUD admins) | `src/app/api/admin/users/route.ts`, `src/app/api/admin/users/[id]/route.ts`, `src/components/admin/user-manager.tsx` | SUPER_ADMIN only (via `requireSuperAdmin()`). List / create / update / disable / delete. `passwordHash` never returned. Lockout prevention enforced server-side. |
+| Lockout prevention guards | `src/app/api/admin/users/[id]/route.ts` | Cannot change own role away from `SUPER_ADMIN`; cannot disable / delete self; cannot disable / downgrade / delete the last active super-admin. Each guard returns 400 with a clear error message. |
+| Audit log (append-only trail) | `prisma/schema.prisma` (`AuditLog` model), `src/lib/audit.ts`, `src/app/api/admin/audit/route.ts`, `src/components/admin/audit-log-viewer.tsx` | Every chemical / SDS / user / system mutation logged via `logAction()`. Fire-and-forget (failures logged to stderr, never propagated). Cursor pagination: fetches `limit+1` rows to detect `hasMore`. |
+| System Settings tab (Phase D) | `src/app/api/admin/system/info/route.ts`, `src/app/api/admin/system/test-ai/route.ts`, `src/components/admin/system-settings.tsx` | SUPER_ADMIN only. 5 read-only info cards (AI provider, storage, database, sync, runtime) + "Test Connection" button. Test-ai route audit-logs `system.test-ai`. |
+| AI provider info + test connection | `src/lib/ai-vlm.ts` → `getProviderInfo()` + `testProviderConnection()` | `getProviderInfo()` returns `{ provider, model, apiKeyConfigured, apiKeyHint (masked), sdkInstalled, notes }` — never returns the actual key. `testProviderConnection()` sends a minimal text-only prompt, never sends an image, never touches the DB. |
+| Password change on next login | `prisma/schema.prisma` (`passwordChangeRequired` field on `User`), `src/app/api/admin/change-password/route.ts`, `src/app/admin/change-password/page.tsx`, `src/components/admin/password-guard.tsx` | Triple-layered enforcement: (1) client `PasswordGuard` redirect, (2) `requireAdmin`/`requireSuperAdmin` return 401 when flag is set, (3) `/api/admin/change-password` verifies `currentPassword` against bcrypt before accepting the new one. Change-password route uses `getServerSession` directly (the only admin route that bypasses `requireAdmin`). |
 
 ### PLANNED (discussed but NOT implemented)
 
@@ -746,7 +822,7 @@ For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
 |---|---|---|
 | AI-powered chatbot for chemical/SDS queries | `aug12-meeting.md` §1 (Mr. Casila suggestion) | **Not started.** Discussed at the August 12 meeting as a potential future enhancement. No code exists. |
 | Excel bulk chemical import | `ADMIN_GUIDE.md` §4.4 ("A future Excel bulk-import feature is planned") | **Not started.** No code, no API route, no UI. |
-| Per-division admin roles / focal persons | `aug12-meeting.md` §4 | **Not started.** Only a single `ADMIN` role exists. |
+| Per-division admin roles / focal persons | `aug12-meeting.md` §4 | **Partially implemented.** 3-tier role hierarchy now exists (`SUPER_ADMIN`/`ADMIN`/`USER`). Per-division scoping (Phase B) explicitly skipped per user decision — all admins see all chemicals. May revisit if division-scoped access is needed. |
 | Regulatory tag display (DENR-EMB / PNP / PDEA) | `aug12-meeting.md` §3.2 | **Partially present.** The `regulatoryTags` field exists in the Prisma schema and Chemical type, and a `RegulatoryTags` component exists. See "Unknown" below. |
 
 ### DEPRECATED / RETIRED (do not use)
