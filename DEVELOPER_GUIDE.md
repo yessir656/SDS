@@ -18,7 +18,7 @@
 | **Node.js 18+** | Next.js 16 needs it. Bun usually bundles a compatible runtime, but having Node helps with tooling. | https://nodejs.org/ |
 | **Git** | To clone the repo. | https://git-scm.com/ |
 
-> **No system packages required.** The AI auto-fill feature uses `pdfjs-dist` + `@napi-rs/canvas` (pure npm packages) to render PDF pages — no Poppler, no `sudo`, no `brew`. Just `bun install` and everything works.
+> **Windows users:** Install Bun with PowerShell (`irm bun.sh/install.ps1 | iex`). All commands below work in **Git Bash** or **WSL**. If you only have CMD/PowerShell, the `dev` script still works (it's just `next dev -p 3000`), but `db:seed` needs Bun regardless.
 
 ### 0.2 Step-by-Step (fresh clone)
 
@@ -42,6 +42,7 @@ cp .env.example .env
 #
 #    Generate a NEXTAUTH_SECRET with:
 #      bun -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'
+#      node -e "console.log(require('crypto').randomBytes(32).toString('hex'))'"
 
 # 5. Create the SQLite database + tables
 bun run db:push
@@ -344,7 +345,7 @@ preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
 | GET | `/api/sync?since=<epoch-ms>` | Delta sync. Returns `{ chemicals: [...], sdsDocuments: [...], deletedChemicalIds: [...], serverTime }`. Only records with `updatedAt > since` (or `deletedAt > since`) are returned. |
 | GET | `/api/chemicals` | List all non-deleted chemicals (metadata only, no PDF). |
 | GET | `/api/chemicals/[id]` | Single chemical. |
-| GET | `/api/sds/[id]/download` | Stream the SDS PDF for chemical `[id]`. Sets `Content-Type: application/pdf`, `Cache-Control: no-store, must-revalidate`, and a strong `ETag` derived from `contentHash`. Supports `If-None-Match` → `304`. The client may append `?v=<version>` as a cache-buster (ignored by the handler). Used by both the public PWA (caches Blob in IndexedDB) and admin "View". |
+| GET | `/api/sds/[id]/download` | Stream the SDS PDF for chemical `[id]`. Sets `Content-Type: application/pdf`. Used by both the public PWA (caches Blob) and admin "View". |
 
 ### Admin (auth required — `requireAdmin()`)
 | Method | Path | Purpose |
@@ -355,124 +356,7 @@ preferences    : UserPreferences  (favorites, notes, theme — LOCAL ONLY)
 | PUT | `/api/admin/chemicals/[id]` | Update. Bumps `serverVersion`. Sets `updatedById`. |
 | DELETE | `/api/admin/chemicals/[id]` | Soft-delete (`deletedAt = now`). Cascade-soft-deletes the SDS. |
 | POST | `/api/admin/sds` | Upload / replace SDS PDF. Multipart form. Validates magic bytes + MIME + extension + size. Stores with UUID filename. Increments `version`, sets `status = available`. |
-| POST | `/api/admin/sds/extract` | **AI extraction.** Upload a PDF → returns structured chemical fields extracted by VLM. Does NOT store the PDF. See [§ 6.1 AI SDS Extraction Pipeline](#61-ai-sds-extraction-pipeline) below. |
 | DELETE | `/api/admin/sds/[id]` | Revert to placeholder. Removes the uploaded file, resets `status = placeholder`, increments `version`. |
-
-### 6.1 AI SDS Extraction Pipeline
-
-`POST /api/admin/sds/extract` — AI-powered auto-fill for the chemical form.
-
-The vision-language model (VLM) is **provider-agnostic**. Choose any one of four
-providers via the `AI_PROVIDER` env var — the extraction logic, prompt, JSON
-parsing, and field sanitization are identical across all of them.
-
-**Supported providers:**
-
-| `AI_PROVIDER` | Package | Default model | Free tier? | Works on local machine? |
-|---|---|---|---|---|
-| `zai` (default) | `z-ai-web-dev-sdk` | `glm-4.6v` | ✅ Always free | ❌ Sandbox-only (internal API) |
-| `gemini` ⭐ | `@google/generative-ai` (installed) | `gemini-2.5-flash` | ✅ 1,500 req/day | ✅ Yes |
-| `openai` | `openai` | `gpt-4o-mini` | ❌ Paid (~$0.01/SDS) | ✅ Yes |
-| `anthropic` | `@anthropic-ai/sdk` | `claude-3-5-sonnet-20241022` | ❌ Paid (~$0.02/SDS) | ✅ Yes |
-
-**Setup:**
-
-1. **On the Z.ai cloud sandbox:** No setup needed. `AI_PROVIDER=zai` is the default and `/etc/.z-ai-config` is pre-configured.
-2. **On your local machine (Gemini — recommended):** The `@google/generative-ai` package is already installed. Just get a key and set the env vars:
-   ```bash
-   # 1. Get a FREE API key at https://aistudio.google.com/apikey
-   # 2. Add to .env:
-   AI_PROVIDER=gemini
-   GEMINI_API_KEY=your-key-here
-   # (optional) GEMINI_MODEL=gemini-2.5-flash  # default; NOTE: 2.0-flash and 1.5-flash are retired (404)
-   ```
-
-**Flow:**
-```
-Admin uploads PDF
-       ↓
-[0] assertProviderConfigured()  — fail fast (< 100ms) if API key missing
-       ↓
-[1] Validate: magic bytes (%PDF-), MIME (application/pdf), extension (.pdf), size (≤10MB)
-       ↓
-[2] rasterizePdfToPngs()  (pdfjs-dist + @napi-rs/canvas — pure JS, no system deps)
-     Renders first 5 PDF pages to PNG buffers at ~150 DPI
-       ↓
-[3] callVlm(images, prompt)  → src/lib/ai-vlm.ts
-     Dispatches to the configured provider (zai / gemini / openai / anthropic).
-     Each provider wraps images as base64 + sends the same extraction prompt.
-     Returns: { text, provider, model }
-       ↓
-[4] Parse VLM response: strip markdown fences, JSON.parse, fallback extraction
-       ↓
-[5] Sanitize: filterValid() drops invalid enum IDs, default signalWord="danger"
-       ↓
-[6] Return { success: true, data: { ...15 fields } }  (no temp files to clean — pure JS)
-```
-
-**Response shape:**
-```json
-{
-  "success": true,
-  "data": {
-    "chemicalName": "Toluene",
-    "casNumber": "108-88-3",
-    "formula": "C₇H₈",
-    "tradeName": "Methylbenzene",
-    "manufacturer": "Sigma-Aldrich",
-    "supplier": "...",
-    "signalWord": "danger",
-    "ghsPictograms": ["flame", "health-hazard", "exclamation-mark"],
-    "hazardClasses": ["flammable", "irritant", "reproductive-toxicant", "specific-target-organ-toxicity"],
-    "storageLocation": "",
-    "safetyInstructions": "...",
-    "emergencyContact": "...",
-    "personalProtectiveEquipment": ["Chemical splash goggles", "Nitrile gloves", "..."],
-    "firstAidMeasures": "...",
-    "firefightingMeasures": "...",
-    "accidentalReleaseMeasures": "..."
-  }
-}
-```
-
-**Error handling:**
-
-| Scenario | HTTP | Response |
-|---|---|---|
-| Not authenticated | 401 | `{ success: false, error: "Unauthorized" }` |
-| Provider API key missing (e.g. `GEMINI_API_KEY` unset) | 503 | `{ success: false, error: "AI_PROVIDER=gemini is set but GEMINI_API_KEY is missing. Get a free key at https://aistudio.google.com/apikey and add it to your .env file." }` |
-| Provider npm package not installed | 503 | `{ success: false, error: "AI_PROVIDER=gemini requires the @google/generative-ai package. Install it with: bun add @google/generative-ai" }` |
-| Provider API call failed (network / auth / rate limit) | 502 | `{ success: false, error: "Gemini request failed: <details>" }` |
-| VLM returned invalid JSON | 502 | `{ success: false, error: "AI response was not valid JSON." }` |
-
-**Key files:**
-- `src/lib/ai-vlm.ts` — **the provider abstraction.** Exports `callVlm(images, prompt)`, `resolveProvider()`, `assertProviderConfigured()`, and the `AiConfigError` / `AiRequestError` error classes. Add new providers here.
-- `src/app/api/admin/sds/extract/route.ts` — the API endpoint. Calls `callVlm()`; doesn't know or care which provider is configured.
-- `src/lib/pdf-rasterize.ts` — pure-JS PDF → PNG renderer (pdfjs-dist + @napi-rs/canvas).
-- `src/components/admin/chemical-manager.tsx` — the frontend `handleAutoFill()` function + "Auto-fill from PDF" button + review banner.
-
-**Adding a new provider:**
-
-1. Add the provider name to the `AiProvider` type in `src/lib/ai-vlm.ts`.
-2. Add a branch in `callVlm()` that calls a new `callYourProvider()` function.
-3. Implement `callYourProvider(images, prompt)` — late-import the SDK, build the request in the provider's format, return `{ text, provider, model }`.
-4. Add the API key check to `assertProviderConfigured()`.
-5. Add the env vars to `.env.example` and document above.
-6. Add the package to `next.config.ts` `serverExternalPackages` if it ships native binaries.
-
-**System dependency:** None. PDF rasterization is handled by `pdfjs-dist` + `@napi-rs/canvas` (both pure npm packages with pre-built native binaries). No Poppler, no `sudo`, no system packages — just `bun install`.
-
-**Cost:**
-- `zai` — Free (in-house service, sandbox-only).
-- `gemini` — Free tier: 1,500 requests/day on `gemini-2.5-flash`. A lab with 200 SDS PDFs will never exhaust this.
-- `openai` — ~$0.01 per extraction on `gpt-4o-mini` (~3K-10K tokens).
-- `anthropic` — ~$0.02 per extraction on `claude-3-5-sonnet`.
-
-**Gemini-specific notes (important):**
-- **Safety filters are disabled** (`BLOCK_NONE` for all 4 HARM categories). SDS documents routinely contain words like "carcinogen", "fatal if swallowed", "severe burns" that trigger Gemini's default safety filters and silently block the response. Without this setting, extraction fails on ~30% of SDS documents.
-- **JSON mode is enabled** (`responseMimeType: "application/json"`) — Gemini returns valid JSON directly, no markdown fences to strip.
-- **Model defaults to `gemini-2.5-flash`** — current generation, fast, good vision. Override with `GEMINI_MODEL` env var if needed. ⚠️ `gemini-2.0-flash` / `gemini-1.5-flash` are retired on the Gemini API (404 "model is no longer available") — don't set them.
-- If you see "Gemini blocked the response due to safety filters", try a different `GEMINI_MODEL` (safety override support varies by model).
 
 ### Auth
 | Method | Path | Purpose |
@@ -501,16 +385,8 @@ Admin uploads PDF
    - Upsert metadata into Dexie.sdsDocuments.
    - Compare version with Dexie.sdsBlobs.
      - If version unchanged AND blob exists → skip (no re-download).
-     - If version changed OR blob missing → GET /api/sds/[id]/download?v=<version>
-       (cache-buster guarantees the browser HTTP cache won't shadow a freshly
-       uploaded PDF), store Blob in Dexie.sdsBlobs with new version.
-
-> **Note on `getSdsBlobForChemical()` (the public "View SDS PDF" path):** this
-> function deliberately **bypasses the local version check when online** and
-> always fetches fresh bytes from the server with `{ cache: "no-store" }`.
-> This is safety-critical: a user who loaded the page before the admin
-> uploaded the real PDF would otherwise see a stale placeholder until the next
-> periodic sync. The IndexedDB cache is only used as an offline fallback.
+     - If version changed OR blob missing → GET /api/sds/[id]/download,
+       store Blob in Dexie.sdsBlobs with new version.
 6. Persist new lastSyncTimestamp = response.serverTime.
 7. Release mutex. Update Zustand sync status.
 ```
@@ -585,9 +461,7 @@ The sandbox gateway (`Caddyfile`) uses an `XTransformPort` query param for port 
   - Precaches app shell (`/`, manifest, icons).
   - Navigations: network-first with cache + app-shell fallback.
   - Static assets: stale-while-revalidate.
-  - SDS PDF responses: **not** cached by the service worker or HTTP cache
-    (`Cache-Control: no-store` on the server). Offline reuse is handled by
-    the IndexedDB `sdsBlobs` store, keyed by SDS version — see [§ 7 Sync Engine](#7-sync-engine).
+  - SDS PDF responses: cached for offline reuse.
 - **Registration** (`src/components/common/service-worker-register.tsx`): production-only to avoid dev caching churn.
 - **Installability:** after a production build, the app is installable on Android/Chrome/iOS.
 
@@ -719,11 +593,6 @@ Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hoo
 | SDS upload 413 | File too large | Check the size limit in `src/lib/validation.ts` / reverse proxy |
 | Dexie schema version conflict | Old client DB version | Bump Dexie schema version in `src/lib/local-db.ts` with an upgrade function |
 | Service worker not updating | Old SW cached | Bump `CACHE_VERSION` in `public/sw.js`; user will get new SW on next load |
-| `spawn pdftoppm ENOENT` when admin clicks "Auto-fill from PDF" | ~~Poppler not installed~~ **Fixed** — extraction now uses pure-JS `pdfjs-dist` + `@napi-rs/canvas` (no system deps). If you see this error, you're on an old version — pull latest and `bun install`. |
-| `Extraction failed: Configuration file not found or invalid` | The default `AI_PROVIDER=zai` only works inside the Z.ai cloud sandbox. On a local machine, set `AI_PROVIDER=gemini` (or `openai` / `anthropic`) + the matching API key in `.env`. See [§ 6.1](#61-ai-sds-extraction-pipeline). |
-| `AI_PROVIDER=gemini is set but GEMINI_API_KEY is missing` | You set `AI_PROVIDER=gemini` in `.env` but didn't add the API key. Get a free key at https://aistudio.google.com/apikey, then set `GEMINI_API_KEY=...` in `.env` and restart `bun run dev`. |
-| `AI_PROVIDER=gemini requires the @google/generative-ai package` | You set `AI_PROVIDER=gemini` but didn't install the SDK. Run: `bun add @google/generative-ai`. (Same pattern for `openai` → `bun add openai`, `anthropic` → `bun add @anthropic-ai/sdk`.) |
-| Public user sees stale placeholder PDF after admin uploads the real one | Browser HTTP cache or stale IndexedDB blob | Fixed in code: download route sends `no-store`, `getSdsBlobForChemical()` always fetches fresh when online. If it recurs, hard-refresh the page and check the SDS `version` in Dexie |
 | Preview shows blank "Z" screen | Dev server not running | `bun run dev` (this is the most common "it's loading" report) |
 
 ---
@@ -736,7 +605,7 @@ The implementation is **complete and verified**:
 - Admin login + dashboard (Overview / Chemicals / SDS) functional.
 - Delta sync API returns correct deltas; client sync engine runs on startup / online / periodic.
 - SDS PDF upload validates files (magic bytes + MIME + extension + size).
-- SDS PDFs cached client-side in IndexedDB for offline viewing. When online, the public "View SDS PDF" button always fetches the latest bytes from the server (`no-store`) and refreshes the cache — a replaced PDF is visible instantly, with no 1-hour HTTP-cache delay.
+- SDS PDFs cached client-side in IndexedDB for offline viewing.
 - Security headers configured; `.env` gitignored; admin auth server-side enforced.
 - TypeScript strict: 0 errors. ESLint: 0 errors.
 

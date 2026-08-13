@@ -9,6 +9,8 @@ import { MapPin, Building2, ChevronRight, ShieldAlert } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { GhsPictogram } from "@/components/ghs/pictograms";
+import { PpeList } from "@/components/common/PpeList";
+import { RegulatoryTags } from "@/components/common/RegulatoryTags";
 import { cn } from "@/lib/utils";
 import type { ChemicalRecord } from "@/types";
 import { useAppStore } from "@/store/app-store";
@@ -93,6 +95,14 @@ function ChemicalCardInner({ chemical }: ChemicalCardProps) {
             )}
           </div>
         )}
+
+        {/* PPE (compact icons) */}
+        <div className="mt-3">
+          <PpeList items={chemical.personalProtectiveEquipment} compact />
+        </div>
+
+        {/* Regulatory classification tags */}
+        <RegulatoryTags tags={chemical.regulatoryTags} />
 
         {/* Bottom: location + department */}
         <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/60 pt-3 text-xs text-muted-foreground">

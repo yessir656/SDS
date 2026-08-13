@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import {
   Accordion,
@@ -33,6 +34,8 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { GhsPictogramBadge } from "@/components/ghs/pictograms";
+import { PpeList } from "@/components/common/PpeList";
+import { RegulatoryTags } from "@/components/common/RegulatoryTags";
 import { useAppStore } from "@/store/app-store";
 import { HAZARD_CLASS_LABELS } from "@/types";
 import { cn } from "@/lib/utils";
@@ -105,7 +108,7 @@ export function ChemicalDetail() {
   return (
     <div className="space-y-5">
       {/* Top bar: back + emergency CTA */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Button
           variant="ghost"
           size="sm"
@@ -116,14 +119,39 @@ export function ChemicalDetail() {
           Catalog
         </Button>
 
-        <Button
-          onClick={() => goToEmergency(chemical)}
-          className="gap-2 bg-red-600 text-white hover:bg-red-700"
-          size="lg"
-        >
-          <ShieldAlert className="h-5 w-5" />
-          Emergency Info
-        </Button>
+        {/* Group the two action buttons so they wrap together instead of overflowing
+            on narrow screens. Emergency stays big/red; PPE Info becomes icon-only on
+            small screens (text shows only at sm+). */}
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Button
+            onClick={() => goToEmergency(chemical)}
+            className="gap-2 bg-red-600 text-white hover:bg-red-700"
+            size="lg"
+          >
+            <ShieldAlert className="h-5 w-5" />
+            Emergency Info
+          </Button>
+
+          {/* PPE Info — a popover so a user can check required gear at a glance */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 border-teal-600 text-teal-700 hover:bg-teal-50 dark:border-teal-400 dark:text-teal-300"
+              >
+                <HardHat className="h-4 w-4" />
+                <span className="hidden sm:inline">PPE Info</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 max-w-[90vw] p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Required Personal Protective Equipment
+              </p>
+              <PpeList items={chemical.personalProtectiveEquipment} />
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
       {/* Header card: identifiers */}
@@ -358,17 +386,8 @@ export function ChemicalDetail() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ul className="space-y-1.5">
-                {chemical.personalProtectiveEquipment.map((ppe, idx) => (
-                  <li
-                    key={idx}
-                    className="flex items-start gap-2 text-sm"
-                  >
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-teal-600" />
-                    <span>{ppe}</span>
-                  </li>
-                ))}
-              </ul>
+              <PpeList items={chemical.personalProtectiveEquipment} />
+              <RegulatoryTags tags={chemical.regulatoryTags} />
             </CardContent>
           </Card>
 

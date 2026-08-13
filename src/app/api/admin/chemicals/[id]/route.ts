@@ -67,6 +67,8 @@ export async function PUT(
   if (data.emergencyContact !== undefined) updateData.emergencyContact = data.emergencyContact;
   if (data.personalProtectiveEquipment !== undefined)
     updateData.personalProtectiveEquipment = JSON.stringify(data.personalProtectiveEquipment);
+  if (data.regulatoryTags !== undefined)
+    updateData.regulatoryTags = JSON.stringify(data.regulatoryTags);
   if (data.firstAidMeasures !== undefined) updateData.firstAidMeasures = data.firstAidMeasures;
   if (data.firefightingMeasures !== undefined) updateData.firefightingMeasures = data.firefightingMeasures;
   if (data.accidentalReleaseMeasures !== undefined)

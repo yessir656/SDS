@@ -139,6 +139,8 @@ export interface ChemicalRecord {
 
   emergencyContact: string;
   personalProtectiveEquipment: string[];
+  /** Regulatory classification tags (DENR-EMB, PDEA, PNP, ...). Optional. */
+  regulatoryTags?: string[];
 
   /** SDS Section 4 — First-aid measures. */
   firstAidMeasures: string;
@@ -330,4 +332,92 @@ export const ALL_HAZARD_CLASSES: HazardClass[] = [
   "reproductive-toxicant",
   "specific-target-organ-toxicity",
   "environmentally-hazardous",
+];
+
+// ---------------------------------------------------------------------------
+// PPE (Personal Protective Equipment)
+// ---------------------------------------------------------------------------
+// Stored in the DB as a JSON-encoded `string[]` (one short phrase per line,
+// e.g. "Nitrile gloves (powder-free)"). At render time these are normalized
+// into { code, label, note } objects so each item can show an inline icon + a
+// small note badge. See src/lib/ppe.ts.
+
+/** Canonical icon keys for PPE items. Picked deterministically from the label. */
+export type PpeCode =
+  | "gloves-powderfree"
+  | "gloves"
+  | "goggles"
+  | "face-shield"
+  | "mask"
+  | "respirator"
+  | "lab-coat"
+  | "apron"
+  | "boots"
+  | "coverall"
+  | "hearing"
+  | "other";
+
+/** A single PPE item as rendered in the UI. */
+export interface PpeItem {
+  code: PpeCode;
+  label: string;
+  /** Extra detail parsed from parentheses, e.g. "powder-free, size L". */
+  note?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Regulatory classifications (from the Aug-12 stakeholder meeting)
+// ---------------------------------------------------------------------------
+
+/**
+ * Regulatory classification tags that may be attached to a chemical.
+ * Only chemicals subject to the relevant agency carry a given tag.
+ * (Mirrors the controlled/regulated-chemicals list Gina will provide.)
+ */
+export const REGULATORY_CLASSIFICATIONS = [
+  "DENR-EMB",
+  "PNP",
+  "PDEA",
+  "FDA",
+  "DOT",
+  "DOH",
+  "Other",
+] as const;
+export type RegulatoryClassification = (typeof REGULATORY_CLASSIFICATIONS)[number];
+
+// ---------------------------------------------------------------------------
+// Emergency contacts (Aug-12 meeting §4.1)
+// ---------------------------------------------------------------------------
+
+/** One entry in the MIRDC-wide emergency contacts list. */
+export interface EmergencyContactEntry {
+  /** e.g. "Pollution Control Officer", "Fire Brigade". */
+  role: string;
+  /** Person or unit to contact. */
+  name: string;
+  /**
+   * Dialable phone for a `tel:` link. Omit until a public/internal number is
+   * provided — entries without a number render as role+name only.
+   */
+  phone?: string;
+}
+
+/**
+ * Designated MIRDC emergency contacts per the Aug-12 meeting (4.1).
+ * Internal line numbers are not published in the meeting notes — add the
+ * `phone` value here to enable tap-to-call on each.
+ */
+export const EMERGENCY_CONTACTS: EmergencyContactEntry[] = [
+  { role: "Pollution Control Officer", name: "Ms. Gina Catalan" },
+  { role: "Chemical Spillage Brigade", name: "Ms. Mary Joy Bautista" },
+  { role: "Fire Brigade", name: "BFP Taguig City FTI", phone: "166" },
+  { role: "First Aid Brigade", name: "Ms. Deborah Balota" },
+  { role: "Safety Officer", name: "Engr. Nestor Colibao" },
+];
+
+/** Always-callable hotlines shown at the top of the Emergency Contacts block. */
+export const EMERGENCY_HOTLINES: EmergencyContactEntry[] = [
+  { role: "MIRDC facility", name: "MIRDC Main Building", phone: "+63 2 8837 0713" },
+  { role: "Poison Control", name: "Philippine Poison Control", phone: "(02) 8521 3225" },
+  { role: "Fire & Rescue", name: "BFP National Hotline", phone: "166" },
 ];

@@ -95,6 +95,7 @@ export async function POST(request: Request) {
         version: data.version,
         emergencyContact: data.emergencyContact,
         personalProtectiveEquipment: JSON.stringify(data.personalProtectiveEquipment),
+        regulatoryTags: JSON.stringify(data.regulatoryTags ?? []),
         firstAidMeasures: data.firstAidMeasures,
         firefightingMeasures: data.firefightingMeasures,
         accidentalReleaseMeasures: data.accidentalReleaseMeasures,

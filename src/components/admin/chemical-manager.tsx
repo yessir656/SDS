@@ -54,6 +54,7 @@ import {
   ALL_GHS_PICTOGRAMS,
   HAZARD_CLASS_LABELS,
   GHS_PICTOGRAM_INFO,
+  REGULATORY_CLASSIFICATIONS,
 } from "@/types";
 import type { Department, SignalWord, HazardClass, GhsPictogram } from "@/types";
 
@@ -74,6 +75,7 @@ interface AdminChemical {
   version: string;
   emergencyContact: string;
   personalProtectiveEquipment: string[];
+  regulatoryTags?: string[];
   firstAidMeasures: string;
   firefightingMeasures: string;
   accidentalReleaseMeasures: string;
@@ -289,6 +291,7 @@ interface FormState {
   version: string;
   emergencyContact: string;
   personalProtectiveEquipment: string;
+  regulatoryTags: string[];
   firstAidMeasures: string;
   firefightingMeasures: string;
   accidentalReleaseMeasures: string;
@@ -320,6 +323,7 @@ function ChemicalFormDialog({
     version: chemical?.version ?? "1.0",
     emergencyContact: chemical?.emergencyContact ?? "",
     personalProtectiveEquipment: chemical?.personalProtectiveEquipment.join("\n") ?? "",
+    regulatoryTags: chemical?.regulatoryTags ?? [],
     firstAidMeasures: chemical?.firstAidMeasures ?? "",
     firefightingMeasures: chemical?.firefightingMeasures ?? "",
     accidentalReleaseMeasures: chemical?.accidentalReleaseMeasures ?? "",
@@ -692,13 +696,55 @@ function ChemicalFormDialog({
           </div>
 
           <div className="space-y-2">
+            <Label htmlFor="regulatoryTags">Regulatory classifications (optional)</Label>
+            <div
+              id="regulatoryTags"
+              className="flex flex-wrap items-center gap-2"
+            >
+              {REGULATORY_CLASSIFICATIONS.map((tag) => {
+                const active = form.regulatoryTags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        regulatoryTags: toggleArray(form.regulatoryTags, tag),
+                      })
+                    }
+                    className={cn(
+                      "rounded-md border px-2.5 py-1 text-xs font-medium transition",
+                      active
+                        ? "border-sky-600 bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200"
+                        : "border-border bg-background text-muted-foreground hover:bg-muted"
+                    )}
+                  >
+                    {active && (
+                      <CheckCircle2 className="mr-1 inline h-3 w-3" />
+                    )}
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Choose from the MIRDC-controlled list (DENR-EMB, PNP, PDEA, FDA,
+              DOT, DOH).
+            </p>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="ppe">PPE (one per line)</Label>
+            <p className="text-[11px] text-muted-foreground">
+              Add a note in parentheses, e.g. "Nitrile gloves (powder-free, size L)".
+            </p>
             <textarea
               id="ppe"
               value={form.personalProtectiveEquipment}
               onChange={(e) => setForm({ ...form, personalProtectiveEquipment: e.target.value })}
               className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              placeholder="Chemical splash goggles&#10;Nitrile gloves&#10;Flame-resistant lab coat"
+              placeholder="Chemical splash goggles&#10;Nitrile gloves (powder-free)&#10;Flame-resistant lab coat"
             />
           </div>
 

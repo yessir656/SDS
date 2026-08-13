@@ -69,6 +69,8 @@ export const createChemicalSchema = z.object({
   version: z.string().trim().max(20).default("1.0"),
   emergencyContact: z.string().trim().max(500).default(""),
   personalProtectiveEquipment: z.array(z.string().trim().max(300)).default([]),
+  /** Regulatory classification tags — free strings, validated against the known set where it matters. */
+  regulatoryTags: z.array(z.string().trim().min(1).max(50)).default([]),
   firstAidMeasures: z.string().trim().max(20000).default(""),
   firefightingMeasures: z.string().trim().max(20000).default(""),
   accidentalReleaseMeasures: z.string().trim().max(20000).default(""),

@@ -19,8 +19,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { GhsPictogram } from "@/components/ghs/pictograms";
+import { PpeList } from "@/components/common/PpeList";
+import { RegulatoryTags } from "@/components/common/RegulatoryTags";
 import { useAppStore } from "@/store/app-store";
 import { cn } from "@/lib/utils";
+import { EMERGENCY_CONTACTS, EMERGENCY_HOTLINES } from "@/types";
 
 export function EmergencyView() {
   const chemical = useAppStore((s) => s.selectedChemical);
@@ -160,30 +163,82 @@ export function EmergencyView() {
               <HardHat className="h-4 w-4 text-teal-600" />
               Required Personal Protective Equipment
             </h2>
-            <div className="flex flex-wrap gap-2">
-              {chemical.personalProtectiveEquipment.map((ppe, idx) => (
-                <span
-                  key={idx}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-900 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-100"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-teal-600" />
-                  {ppe}
-                </span>
-              ))}
-            </div>
+            <PpeList items={chemical.personalProtectiveEquipment} />
+            <RegulatoryTags tags={chemical.regulatoryTags} />
           </CardContent>
         </Card>
 
-        {/* Emergency contact — large, prominent */}
+        {/* Emergency contact — large, prominent, with a PPE quick-scan beside it */}
         <Card className="border-2 border-red-600 bg-red-50 dark:bg-red-950/30">
           <CardContent className="p-5">
             <h2 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-red-700 dark:text-red-300">
               <Phone className="h-4 w-4" />
               Emergency Contact
             </h2>
-            <p className="text-xl font-bold text-red-900 dark:text-red-100">
-              {chemical.emergencyContact}
-            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              <p className="text-xl font-bold text-red-900 dark:text-red-100">
+                {chemical.emergencyContact}
+              </p>
+              {/* Glanceable PPE reminder, right beside the contact info */}
+              <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-red-700/80 dark:text-red-300/80">
+                <span>PPE</span>
+                <PpeList items={chemical.personalProtectiveEquipment} iconsOnly />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Emergency Contacts — MIRDC-wide designated people + hotlines (Aug-12 meeting 4.1) */}
+        <Card className="border-2 border-sky-300 bg-sky-50/40 dark:border-sky-800 dark:bg-sky-950/20">
+          <CardContent className="p-4">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+              <Phone className="h-4 w-4 text-sky-600" />
+              Emergency Contacts
+            </h2>
+            <div className="space-y-3">
+              {EMERGENCY_HOTLINES.map((c) => (
+                <div
+                  key={c.role}
+                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5"
+                >
+                  <span className="text-sm">
+                    <span className="font-semibold">{c.role}</span>
+                    <span className="text-muted-foreground"> · {c.name}</span>
+                  </span>
+                  <a
+                    href={`tel:${(c.phone ?? "").replace(/\s+/g, "")}`}
+                    className="font-mono text-sm font-bold text-sky-700 hover:underline dark:text-sky-300"
+                  >
+                    {c.phone}
+                  </a>
+                </div>
+              ))}
+
+              <div className="space-y-1.5 border-t border-border/50 pt-2">
+                {EMERGENCY_CONTACTS.map((c) => (
+                  <div
+                    key={c.role}
+                    className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5"
+                  >
+                    <span className="text-sm">
+                      {c.role} — {c.name}
+                    </span>
+                    {c.phone ? (
+                      <a
+                        href={`tel:${c.phone.replace(/\s+/g, "")}`}
+                        className="font-mono text-sm font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                      >
+                        {c.phone}
+                      </a>
+                    ) : (
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        internal line
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </CardContent>
         </Card>
 

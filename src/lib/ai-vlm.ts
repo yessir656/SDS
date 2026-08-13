@@ -264,9 +264,9 @@ async function callGemini(
 
   const apiKey = process.env.GEMINI_API_KEY!.trim();
   // Default to gemini-3.6-flash — current generation, fast, good vision.
-  // NOTE: gemini-2.0-flash, gemini-1.5-flash and gemini-2.5-flash are RETIRED
-  // on the Gemini API (404 "model no longer available"). Override with
-  // GEMINI_MODEL only if you know the model is still served.
+  // NOTE: older generations (1.5 / 2.0 / 2.5) are retired on the Gemini API and
+  // return 404 "model no longer available". Override with GEMINI_MODEL only if
+  // you know the model is still served.
   const model = process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
 
   const genAI = new GoogleGenerativeAI(apiKey);

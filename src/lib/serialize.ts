@@ -23,6 +23,7 @@ export interface ClientChemical {
   version: string;
   emergencyContact: string;
   personalProtectiveEquipment: string[];
+  regulatoryTags: string[];
   firstAidMeasures: string;
   firefightingMeasures: string;
   accidentalReleaseMeasures: string;
@@ -65,6 +66,7 @@ export function serializeChemical(c: Chemical): ClientChemical {
     version: c.version,
     emergencyContact: c.emergencyContact,
     personalProtectiveEquipment: safeJsonArray(c.personalProtectiveEquipment),
+    regulatoryTags: safeJsonArray(c.regulatoryTags ?? "[]"),
     firstAidMeasures: c.firstAidMeasures,
     firefightingMeasures: c.firefightingMeasures,
     accidentalReleaseMeasures: c.accidentalReleaseMeasures,

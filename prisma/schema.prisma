@@ -50,6 +50,10 @@ model Chemical {
   department          String  @default("")
   safetyInstructions  String  @default("")
 
+  // Regulatory classification tags (DENR-EMB, PDEA, PNP, FDA, ...). JSON-encoded
+  // string[] — only populated for chemicals subject to the relevant agency.
+  regulatoryTags       String @default("[]")
+
   version         String  @default("1.0")
   emergencyContact String @default("")
   personalProtectiveEquipment String @default("[]") // JSON array
