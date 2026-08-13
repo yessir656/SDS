@@ -1,0 +1,746 @@
+     1→"use client";
+     2→
+     3→// ============================================================================
+     4→// UserManager — super-admin-only UI for managing admin accounts.
+     5→//
+     6→// Features:
+     7→//   • List every admin user (email, name, role, status, last login)
+     8→//   • Add a new admin (email + temp password + role)
+     9→//   • Edit a user (name, role, reset password, disable/enable)
+    10→//   • Delete a user (with last-super-admin guard)
+    11→//   • Lockout prevention: cannot disable/delete self or downgrade own role
+    12→// ============================================================================
+    13→
+    14→import { useEffect, useState, useCallback } from "react";
+    15→import { useSession } from "next-auth/react";
+    16→import {
+    17→  UserPlus,
+    18→  Search,
+    19→  Pencil,
+    20→  Trash2,
+    21→  RefreshCw,
+    22→  Loader2,
+    23→  ShieldCheck,
+    24→  Shield,
+    25→  Ban,
+    26→  CheckCircle2,
+    27→  KeyRound,
+    28→  AlertCircle,
+    29→} from "lucide-react";
+    30→import { Button } from "@/components/ui/button";
+    31→import { Input } from "@/components/ui/input";
+    32→import { Label } from "@/components/ui/label";
+    33→import { Badge } from "@/components/ui/badge";
+    34→import { Card, CardContent } from "@/components/ui/card";
+    35→import {
+    36→  Dialog,
+    37→  DialogContent,
+    38→  DialogHeader,
+    39→  DialogTitle,
+    40→  DialogDescription,
+    41→  DialogFooter,
+    42→} from "@/components/ui/dialog";
+    43→import {
+    44→  Select,
+    45→  SelectContent,
+    46→  SelectItem,
+    47→  SelectTrigger,
+    48→  SelectValue,
+    49→} from "@/components/ui/select";
+    50→import {
+    51→  AlertDialog,
+    52→  AlertDialogAction,
+    53→  AlertDialogCancel,
+    54→  AlertDialogContent,
+    55→  AlertDialogDescription,
+    56→  AlertDialogFooter,
+    57→  AlertDialogHeader,
+    58→  AlertDialogTitle,
+    59→} from "@/components/ui/alert-dialog";
+    60→import { toast } from "sonner";
+    61→import { cn } from "@/lib/utils";
+    62→
+    63→// ---------------------------------------------------------------------------
+    64→// Types — mirror the API responses.
+    65→// ---------------------------------------------------------------------------
+    66→
+    67→interface AdminUser {
+    68→  id: string;
+    69→  email: string;
+    70→  name: string | null;
+    71→  role: "SUPER_ADMIN" | "ADMIN" | "USER";
+    72→  disabled: boolean;
+    73→  passwordChangeRequired: boolean;
+    74→  lastLoginAt: number | null;
+    75→  createdAt: number;
+    76→  updatedAt: number;
+    77→}
+    78→
+    79→// ---------------------------------------------------------------------------
+    80→// Helpers
+    81→// ---------------------------------------------------------------------------
+    82→
+    83→function formatRelative(ts: number | null): string {
+    84→  if (!ts) return "never";
+    85→  const diff = Date.now() - ts;
+    86→  const mins = Math.floor(diff / 60_000);
+    87→  if (mins < 1) return "just now";
+    88→  if (mins < 60) return `${mins}m ago`;
+    89→  const hours = Math.floor(mins / 60);
+    90→  if (hours < 24) return `${hours}h ago`;
+    91→  const days = Math.floor(hours / 24);
+    92→  if (days < 30) return `${days}d ago`;
+    93→  return new Date(ts).toLocaleDateString();
+    94→}
+    95→
+    96→// ---------------------------------------------------------------------------
+    97→// Component
+    98→// ---------------------------------------------------------------------------
+    99→
+   100→export function UserManager() {
+   101→  const { data: session } = useSession();
+   102→  const currentUserId = session?.user?.id;
+   103→
+   104→  const [users, setUsers] = useState<AdminUser[] | null>(null);
+   105→  const [loading, setLoading] = useState(true);
+   106→  const [search, setSearch] = useState("");
+   107→
+   108→  // Dialog state
+   109→  const [createOpen, setCreateOpen] = useState(false);
+   110→  const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
+   111→  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+   112→
+   113→  const load = useCallback(async () => {
+   114→    setLoading(true);
+   115→    try {
+   116→      const res = await fetch("/api/admin/users", { cache: "no-store" });
+   117→      if (!res.ok) throw new Error("Failed to load users");
+   118→      const data = await res.json();
+   119→      setUsers(data.users);
+   120→    } catch (err) {
+   121→      toast.error(err instanceof Error ? err.message : "Failed to load users");
+   122→      setUsers([]);
+   123→    } finally {
+   124→      setLoading(false);
+   125→    }
+   126→  }, []);
+   127→
+   128→  useEffect(() => {
+   129→    void load();
+   130→  }, [load]);
+   131→
+   132→  const filtered = (users ?? []).filter((u) => {
+   133→    if (!search.trim()) return true;
+   134→    const q = search.toLowerCase();
+   135→    return (
+   136→      u.email.toLowerCase().includes(q) ||
+   137→      (u.name?.toLowerCase().includes(q) ?? false) ||
+   138→      u.role.toLowerCase().includes(q)
+   139→    );
+   140→  });
+   141→
+   142→  const superAdminCount = (users ?? []).filter(
+   143→    (u) => u.role === "SUPER_ADMIN" && !u.disabled
+   144→  ).length;
+   145→
+   146→  return (
+   147→    <div className="space-y-4">
+   148→      {/* Toolbar */}
+   149→      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   150→        <div className="flex items-center gap-2">
+   151→          <h2 className="text-lg font-semibold">User Management</h2>
+   152→          <Badge variant="secondary" className="gap-1">
+   153→            <ShieldCheck className="h-3 w-3" />
+   154→            {superAdminCount} super-admin{superAdminCount !== 1 ? "s" : ""}
+   155→          </Badge>
+   156→        </div>
+   157→        <div className="flex items-center gap-2">
+   158→          <div className="relative">
+   159→            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   160→            <Input
+   161→              placeholder="Search users…"
+   162→              value={search}
+   163→              onChange={(e) => setSearch(e.target.value)}
+   164→              className="h-9 w-full pl-8 sm:w-64"
+   165→            />
+   166→          </div>
+   167→          <Button
+   168→            variant="outline"
+   169→            size="sm"
+   170→            onClick={() => void load()}
+   171→            disabled={loading}
+   172→            className="gap-2"
+   173→          >
+   174→            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+   175→            <span className="hidden sm:inline">Refresh</span>
+   176→          </Button>
+   177→          <Button
+   178→            size="sm"
+   179→            onClick={() => setCreateOpen(true)}
+   180→            className="gap-2"
+   181→          >
+   182→            <UserPlus className="h-4 w-4" />
+   183→            <span className="hidden sm:inline">Add User</span>
+   184→          </Button>
+   185→        </div>
+   186→      </div>
+   187→
+   188→      {/* Hint card */}
+   189→      <Card className="border-dashed bg-muted/30">
+   190→        <CardContent className="flex items-start gap-3 p-4 text-sm">
+   191→          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+   192→          <div className="text-muted-foreground">
+   193→            <strong className="text-foreground">SUPER_ADMIN</strong> can create,
+   194→            edit, disable, and delete admin accounts. You cannot disable or
+   195→            delete your own account, remove your own super-admin role, or remove
+   196→            the last active super-admin. All actions are written to the audit log.
+   197→          </div>
+   198→        </CardContent>
+   199→      </Card>
+   200→
+   201→      {/* Table */}
+   202→      <Card>
+   203→        <CardContent className="p-0">
+   204→          {loading && !users ? (
+   205→            <div className="flex h-40 items-center justify-center">
+   206→              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+   207→            </div>
+   208→          ) : filtered.length === 0 ? (
+   209→            <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+   210→              No users found.
+   211→            </div>
+   212→          ) : (
+   213→            <div className="overflow-x-auto">
+   214→              <table className="w-full text-sm">
+   215→                <thead className="border-b bg-muted/40 text-left">
+   216→                  <tr>
+   217→                    <th className="px-4 py-3 font-medium">User</th>
+   218→                    <th className="px-4 py-3 font-medium">Role</th>
+   219→                    <th className="px-4 py-3 font-medium">Status</th>
+   220→                    <th className="hidden px-4 py-3 font-medium md:table-cell">
+   221→                      Last Login
+   222→                    </th>
+   223→                    <th className="hidden px-4 py-3 font-medium lg:table-cell">
+   224→                      Created
+   225→                    </th>
+   226→                    <th className="px-4 py-3 text-right font-medium">Actions</th>
+   227→                  </tr>
+   228→                </thead>
+   229→                <tbody>
+   230→                  {filtered.map((u) => {
+   231→                    const isSelf = u.id === currentUserId;
+   232→                    return (
+   233→                      <tr
+   234→                        key={u.id}
+   235→                        className="border-b last:border-0 hover:bg-muted/30"
+   236→                      >
+   237→                        <td className="px-4 py-3">
+   238→                          <div className="flex flex-col">
+   239→                            <span className="font-medium">
+   240→                              {u.name ?? u.email}
+   241→                              {isSelf && (
+   242→                                <span className="ml-2 text-xs text-muted-foreground">
+   243→                                  (you)
+   244→                                </span>
+   245→                              )}
+   246→                            </span>
+   247→                            <span className="text-xs text-muted-foreground">
+   248→                              {u.email}
+   249→                            </span>
+   250→                          </div>
+   251→                        </td>
+   252→                        <td className="px-4 py-3">
+   253→                          {u.role === "SUPER_ADMIN" ? (
+   254→                            <Badge className="gap-1 bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-200">
+   255→                              <ShieldCheck className="h-3 w-3" />
+   256→                              Super Admin
+   257→                            </Badge>
+   258→                          ) : (
+   259→                            <Badge variant="secondary" className="gap-1">
+   260→                              <Shield className="h-3 w-3" />
+   261→                              Admin
+   262→                            </Badge>
+   263→                          )}
+   264→                        </td>
+   265→                        <td className="px-4 py-3">
+   266→                          {u.disabled ? (
+   267→                            <Badge variant="destructive" className="gap-1">
+   268→                              <Ban className="h-3 w-3" />
+   269→                              Disabled
+   270→                            </Badge>
+   271→                          ) : (
+   272→                            <Badge
+   273→                              variant="outline"
+   274→                              className="gap-1 border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400"
+   275→                            >
+   276→                              <CheckCircle2 className="h-3 w-3" />
+   277→                              Active
+   278→                            </Badge>
+   279→                          )}
+   280→                          {u.passwordChangeRequired && !u.disabled && (
+   281→                            <Badge
+   282→                              variant="outline"
+   283→                              className="ml-1 gap-1 border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+   284→                              title="User must change their password on next login"
+   285→                            >
+   286→                              <KeyRound className="h-3 w-3" />
+   287→                              PW change
+   288→                            </Badge>
+   289→                          )}
+   290→                        </td>
+   291→                        <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
+   292→                          {formatRelative(u.lastLoginAt)}
+   293→                        </td>
+   294→                        <td className="hidden px-4 py-3 text-muted-foreground lg:table-cell">
+   295→                          {new Date(u.createdAt).toLocaleDateString()}
+   296→                        </td>
+   297→                        <td className="px-4 py-3">
+   298→                          <div className="flex justify-end gap-1">
+   299→                            <Button
+   300→                              variant="ghost"
+   301→                              size="sm"
+   302→                              onClick={() => setEditTarget(u)}
+   303→                              className="gap-1"
+   304→                            >
+   305→                              <Pencil className="h-3.5 w-3.5" />
+   306→                              <span className="hidden sm:inline">Edit</span>
+   307→                            </Button>
+   308→                            <Button
+   309→                              variant="ghost"
+   310→                              size="sm"
+   311→                              onClick={() => setDeleteTarget(u)}
+   312→                              disabled={isSelf}
+   313→                              className="gap-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950"
+   314→                              title={isSelf ? "You cannot delete your own account" : "Delete user"}
+   315→                            >
+   316→                              <Trash2 className="h-3.5 w-3.5" />
+   317→                              <span className="hidden sm:inline">Delete</span>
+   318→                            </Button>
+   319→                          </div>
+   320→                        </td>
+   321→                      </tr>
+   322→                    );
+   323→                  })}
+   324→                </tbody>
+   325→              </table>
+   326→            </div>
+   327→          )}
+   328→        </CardContent>
+   329→      </Card>
+   330→
+   331→      {/* Create dialog */}
+   332→      <CreateUserDialog
+   333→        open={createOpen}
+   334→        onOpenChange={setCreateOpen}
+   335→        onCreated={() => {
+   336→          setCreateOpen(false);
+   337→          void load();
+   338→        }}
+   339→      />
+   340→
+   341→      {/* Edit dialog */}
+   342→      <EditUserDialog
+   343→        target={editTarget}
+   344→        onOpenChange={(open) => !open && setEditTarget(null)}
+   345→        onSaved={() => {
+   346→          setEditTarget(null);
+   347→          void load();
+   348→        }}
+   349→      />
+   350→
+   351→      {/* Delete confirmation */}
+   352→      <AlertDialog
+   353→        open={!!deleteTarget}
+   354→        onOpenChange={(open) => !open && setDeleteTarget(null)}
+   355→      >
+   356→        <AlertDialogContent>
+   357→          <AlertDialogHeader>
+   358→            <AlertDialogTitle>Delete user account?</AlertDialogTitle>
+   359→            <AlertDialogDescription>
+   360→              This will permanently delete{" "}
+   361→              <strong>{deleteTarget?.email}</strong>. Their audit log entries
+   362→              will be preserved (with the email denormalized). This action
+   363→              cannot be undone.
+   364→            </AlertDialogDescription>
+   365→          </AlertDialogHeader>
+   366→          <AlertDialogFooter>
+   367→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   368→            <AlertDialogAction
+   369→              className="bg-red-600 hover:bg-red-700"
+   370→              onClick={async () => {
+   371→                if (!deleteTarget) return;
+   372→                try {
+   373→                  const res = await fetch(
+   374→                    `/api/admin/users/${deleteTarget.id}`,
+   375→                    { method: "DELETE" }
+   376→                  );
+   377→                  if (!res.ok) {
+   378→                    const data = await res.json().catch(() => ({}));
+   379→                    throw new Error(data.error || "Delete failed");
+   380→                  }
+   381→                  toast.success(`Deleted ${deleteTarget.email}`);
+   382→                  setDeleteTarget(null);
+   383→                  void load();
+   384→                } catch (err) {
+   385→                  toast.error(err instanceof Error ? err.message : "Delete failed");
+   386→                }
+   387→              }}
+   388→            >
+   389→              Delete permanently
+   390→            </AlertDialogAction>
+   391→          </AlertDialogFooter>
+   392→        </AlertDialogContent>
+   393→      </AlertDialog>
+   394→    </div>
+   395→  );
+   396→}
+   397→
+   398→// ---------------------------------------------------------------------------
+   399→// CreateUserDialog
+   400→// ---------------------------------------------------------------------------
+   401→
+   402→function CreateUserDialog({
+   403→  open,
+   404→  onOpenChange,
+   405→  onCreated,
+   406→}: {
+   407→  open: boolean;
+   408→  onOpenChange: (open: boolean) => void;
+   409→  onCreated: () => void;
+   410→}) {
+   411→  const [email, setEmail] = useState("");
+   412→  const [name, setName] = useState("");
+   413→  const [password, setPassword] = useState("");
+   414→  const [role, setRole] = useState<"ADMIN" | "SUPER_ADMIN">("ADMIN");
+   415→  const [requirePasswordChange, setRequirePasswordChange] = useState(true);
+   416→  const [saving, setSaving] = useState(false);
+   417→
+   418→  function reset() {
+   419→    setEmail("");
+   420→    setName("");
+   421→    setPassword("");
+   422→    setRole("ADMIN");
+   423→    setRequirePasswordChange(true);
+   424→  }
+   425→
+   426→  async function handleCreate() {
+   427→    if (!email || !password) {
+   428→      toast.error("Email and password are required");
+   429→      return;
+   430→    }
+   431→    if (password.length < 8) {
+   432→      toast.error("Password must be at least 8 characters");
+   433→      return;
+   434→    }
+   435→    setSaving(true);
+   436→    try {
+   437→      const res = await fetch("/api/admin/users", {
+   438→        method: "POST",
+   439→        headers: { "Content-Type": "application/json" },
+   440→        body: JSON.stringify({
+   441→          email: email.trim().toLowerCase(),
+   442→          name: name.trim() || undefined,
+   443→          password,
+   444→          role,
+   445→          passwordChangeRequired: requirePasswordChange,
+   446→        }),
+   447→      });
+   448→      if (!res.ok) {
+   449→        const data = await res.json().catch(() => ({}));
+   450→        throw new Error(data.error || "Create failed");
+   451→      }
+   452→      toast.success(`Created ${role} account for ${email}`);
+   453→      reset();
+   454→      onCreated();
+   455→    } catch (err) {
+   456→      toast.error(err instanceof Error ? err.message : "Create failed");
+   457→    } finally {
+   458→      setSaving(false);
+   459→    }
+   460→  }
+   461→
+   462→  return (
+   463→    <Dialog open={open} onOpenChange={onOpenChange}>
+   464→      <DialogContent>
+   465→        <DialogHeader>
+   466→          <DialogTitle>Add Admin User</DialogTitle>
+   467→          <DialogDescription>
+   468→            Create a new admin account. The user can sign in immediately with
+   469→            the temporary password you set.
+   470→          </DialogDescription>
+   471→        </DialogHeader>
+   472→        <div className="space-y-4 py-2">
+   473→          <div className="space-y-2">
+   474→            <Label htmlFor="cu-email">Email</Label>
+   475→            <Input
+   476→              id="cu-email"
+   477→              type="email"
+   478→              value={email}
+   479→              onChange={(e) => setEmail(e.target.value)}
+   480→              placeholder="name@mirdc.dost.gov.ph"
+   481→              autoComplete="off"
+   482→            />
+   483→          </div>
+   484→          <div className="space-y-2">
+   485→            <Label htmlFor="cu-name">Display name (optional)</Label>
+   486→            <Input
+   487→              id="cu-name"
+   488→              value={name}
+   489→              onChange={(e) => setName(e.target.value)}
+   490→              placeholder="Juan Dela Cruz"
+   491→            />
+   492→          </div>
+   493→          <div className="space-y-2">
+   494→            <Label htmlFor="cu-pass">Temporary password</Label>
+   495→            <Input
+   496→              id="cu-pass"
+   497→              type="password"
+   498→              value={password}
+   499→              onChange={(e) => setPassword(e.target.value)}
+   500→              placeholder="At least 8 characters"
+   501→              autoComplete="new-password"
+   502→            />
+   503→            <p className="text-xs text-muted-foreground">
+   504→              Communicate this securely to the user.
+   505→            </p>
+   506→          </div>
+   507→          <div className="space-y-2">
+   508→            <Label>Role</Label>
+   509→            <Select
+   510→              value={role}
+   511→              onValueChange={(v: "ADMIN" | "SUPER_ADMIN") => setRole(v)}
+   512→            >
+   513→              <SelectTrigger>
+   514→                <SelectValue />
+   515→              </SelectTrigger>
+   516→              <SelectContent>
+   517→                <SelectItem value="ADMIN">Admin — manage chemicals & SDS</SelectItem>
+   518→                <SelectItem value="SUPER_ADMIN">
+   519→                  Super Admin — full access + user management
+   520→                </SelectItem>
+   521→              </SelectContent>
+   522→            </Select>
+   523→          </div>
+   524→          <label
+   525→            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30"
+   526→            htmlFor="cu-force-pw"
+   527→          >
+   528→            <input
+   529→              id="cu-force-pw"
+   530→              type="checkbox"
+   531→              checked={requirePasswordChange}
+   532→              onChange={(e) => setRequirePasswordChange(e.target.checked)}
+   533→              className="mt-0.5 h-4 w-4 rounded border-input"
+   534→            />
+   535→            <div className="space-y-0.5">
+   536→              <div className="text-sm font-medium">Require password change on next login</div>
+   537→              <div className="text-xs text-muted-foreground">
+   538→                User will be redirected to a password-change page before they
+   539→                can reach the dashboard. Recommended for temporary passwords.
+   540→              </div>
+   541→            </div>
+   542→          </label>
+   543→        </div>
+   544→        <DialogFooter>
+   545→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   546→            Cancel
+   547→          </Button>
+   548→          <Button onClick={handleCreate} disabled={saving} className="gap-2">
+   549→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   550→            Create User
+   551→          </Button>
+   552→        </DialogFooter>
+   553→      </DialogContent>
+   554→    </Dialog>
+   555→  );
+   556→}
+   557→
+   558→// ---------------------------------------------------------------------------
+   559→// EditUserDialog
+   560→// ---------------------------------------------------------------------------
+   561→
+   562→function EditUserDialog({
+   563→  target,
+   564→  onOpenChange,
+   565→  onSaved,
+   566→}: {
+   567→  target: AdminUser | null;
+   568→  onOpenChange: (open: boolean) => void;
+   569→  onSaved: () => void;
+   570→}) {
+   571→  const { data: session } = useSession();
+   572→  const isSelf = target?.id === session?.user?.id;
+   573→
+   574→  const [name, setName] = useState("");
+   575→  const [role, setRole] = useState<"ADMIN" | "SUPER_ADMIN">("ADMIN");
+   576→  const [disabled, setDisabled] = useState(false);
+   577→  const [newPassword, setNewPassword] = useState("");
+   578→  const [requirePwChange, setRequirePwChange] = useState(false);
+   579→  const [saving, setSaving] = useState(false);
+   580→
+   581→  // Sync form state when target changes.
+   582→  useEffect(() => {
+   583→    if (target) {
+   584→      setName(target.name ?? "");
+   585→      setRole(target.role === "SUPER_ADMIN" ? "SUPER_ADMIN" : "ADMIN");
+   586→      setDisabled(target.disabled);
+   587→      setRequirePwChange(target.passwordChangeRequired);
+   588→      setNewPassword("");
+   589→    }
+   590→  }, [target]);
+   591→
+   592→  async function handleSave() {
+   593→    if (!target) return;
+   594→    setSaving(true);
+   595→    try {
+   596→      const patch: Record<string, unknown> = {
+   597→        name: name.trim() || null,
+   598→        role,
+   599→        disabled,
+   600→        passwordChangeRequired: requirePwChange,
+   601→      };
+   602→      if (newPassword) {
+   603→        if (newPassword.length < 8) {
+   604→          toast.error("New password must be at least 8 characters");
+   605→          setSaving(false);
+   606→          return;
+   607→        }
+   608→        patch.password = newPassword;
+   609→      }
+   610→      const res = await fetch(`/api/admin/users/${target.id}`, {
+   611→        method: "PATCH",
+   612→        headers: { "Content-Type": "application/json" },
+   613→        body: JSON.stringify(patch),
+   614→      });
+   615→      if (!res.ok) {
+   616→        const data = await res.json().catch(() => ({}));
+   617→        throw new Error(data.error || "Update failed");
+   618→      }
+   619→      toast.success(`Updated ${target.email}`);
+   620→      onSaved();
+   621→    } catch (err) {
+   622→      toast.error(err instanceof Error ? err.message : "Update failed");
+   623→    } finally {
+   624→      setSaving(false);
+   625→    }
+   626→  }
+   627→
+   628→  if (!target) return null;
+   629→
+   630→  return (
+   631→    <Dialog open={!!target} onOpenChange={onOpenChange}>
+   632→      <DialogContent>
+   633→        <DialogHeader>
+   634→          <DialogTitle>Edit {target.email}</DialogTitle>
+   635→          <DialogDescription>
+   636→            Update display name, role, account status, or reset the password.
+   637→          </DialogDescription>
+   638→        </DialogHeader>
+   639→        <div className="space-y-4 py-2">
+   640→          <div className="space-y-2">
+   641→            <Label htmlFor="eu-name">Display name</Label>
+   642→            <Input
+   643→              id="eu-name"
+   644→              value={name}
+   645→              onChange={(e) => setName(e.target.value)}
+   646→              placeholder="(no name set)"
+   647→            />
+   648→          </div>
+   649→          <div className="space-y-2">
+   650→            <Label>Role</Label>
+   651→            <Select
+   652→              value={role}
+   653→              onValueChange={(v: "ADMIN" | "SUPER_ADMIN") => setRole(v)}
+   654→              disabled={isSelf && role === "SUPER_ADMIN"}
+   655→            >
+   656→              <SelectTrigger>
+   657→                <SelectValue />
+   658→              </SelectTrigger>
+   659→              <SelectContent>
+   660→                <SelectItem value="ADMIN">Admin</SelectItem>
+   661→                <SelectItem value="SUPER_ADMIN">Super Admin</SelectItem>
+   662→              </SelectContent>
+   663→            </Select>
+   664→            {isSelf && (
+   665→              <p className="text-xs text-amber-600 dark:text-amber-400">
+   666→                You cannot remove your own super-admin role.
+   667→              </p>
+   668→            )}
+   669→          </div>
+   670→          <div className="flex items-center justify-between rounded-md border p-3">
+   671→            <div>
+   672→              <div className="text-sm font-medium">Account status</div>
+   673→              <div className="text-xs text-muted-foreground">
+   674→                Disabled accounts cannot sign in.
+   675→              </div>
+   676→            </div>
+   677→            <Button
+   678→              variant={disabled ? "outline" : "destructive"}
+   679→              size="sm"
+   680→              disabled={isSelf}
+   681→              onClick={() => setDisabled(!disabled)}
+   682→              className="gap-2"
+   683→            >
+   684→              <Ban className="h-3.5 w-3.5" />
+   685→              {disabled ? "Enable account" : "Disable account"}
+   686→            </Button>
+   687→            {isSelf && (
+   688→              <span className="text-xs text-amber-600 dark:text-amber-400">
+   689→                Cannot disable self
+   690→              </span>
+   691→            )}
+   692→          </div>
+   693→          <div className="space-y-2">
+   694→            <Label htmlFor="eu-pass" className="flex items-center gap-2">
+   695→              <KeyRound className="h-3.5 w-3.5" />
+   696→              Reset password (optional)
+   697→            </Label>
+   698→            <Input
+   699→              id="eu-pass"
+   700→              type="password"
+   701→              value={newPassword}
+   702→              onChange={(e) => setNewPassword(e.target.value)}
+   703→              placeholder="Leave blank to keep current password"
+   704→              autoComplete="new-password"
+   705→            />
+   706→            {newPassword && (
+   707→              <p className="text-xs text-amber-600 dark:text-amber-400">
+   708→                Resetting the password will automatically require a change on
+   709→                next login unless you toggle that off below.
+   710→              </p>
+   711→            )}
+   712→          </div>
+   713→          <label
+   714→            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30"
+   715→            htmlFor="eu-force-pw"
+   716→          >
+   717→            <input
+   718→              id="eu-force-pw"
+   719→              type="checkbox"
+   720→              checked={requirePwChange}
+   721→              onChange={(e) => setRequirePwChange(e.target.checked)}
+   722→              className="mt-0.5 h-4 w-4 rounded border-input"
+   723→            />
+   724→            <div className="space-y-0.5">
+   725→              <div className="text-sm font-medium">Require password change on next login</div>
+   726→              <div className="text-xs text-muted-foreground">
+   727→                User will be redirected to a password-change page before they
+   728→                can reach the dashboard.
+   729→              </div>
+   730→            </div>
+   731→          </label>
+   732→        </div>
+   733→        <DialogFooter>
+   734→          <Button variant="outline" onClick={() => onOpenChange(false)}>
+   735→            Cancel
+   736→          </Button>
+   737→          <Button onClick={handleSave} disabled={saving} className="gap-2">
+   738→            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   739→            Save Changes
+   740→          </Button>
+   741→        </DialogFooter>
+   742→      </DialogContent>
+   743→    </Dialog>
+   744→  );
+   745→}
+   746→
