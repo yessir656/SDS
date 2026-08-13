@@ -27,6 +27,7 @@ const updateUserSchema = z
     role: z.enum(["ADMIN", "SUPER_ADMIN"]).optional(),
     disabled: z.boolean().optional(),
     password: z.string().min(8).max(128).optional(),
+    passwordChangeRequired: z.boolean().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, {
     message: "At least one field must be provided",
@@ -118,14 +119,23 @@ export async function PATCH(
   if (data.name !== undefined) updateData.name = data.name;
   if (data.role !== undefined) updateData.role = data.role;
   if (data.disabled !== undefined) updateData.disabled = data.disabled;
+  if (data.passwordChangeRequired !== undefined)
+    updateData.passwordChangeRequired = data.passwordChangeRequired;
   if (data.password !== undefined) {
     updateData.passwordHash = await hashPassword(data.password);
+    // Resetting a password should re-require a change unless the super-admin
+    // explicitly says otherwise. If they explicitly set passwordChangeRequired
+    // in the same PATCH, that value wins.
+    if (data.passwordChangeRequired === undefined) {
+      updateData.passwordChangeRequired = true;
+    }
   }
 
   const before = {
     name: target.name,
     role: target.role,
     disabled: target.disabled,
+    passwordChangeRequired: target.passwordChangeRequired,
   };
 
   const updated = await db.user.update({
@@ -137,6 +147,7 @@ export async function PATCH(
       name: true,
       role: true,
       disabled: true,
+      passwordChangeRequired: true,
       lastLoginAt: true,
       updatedAt: true,
     },
@@ -147,6 +158,8 @@ export async function PATCH(
   if (data.name !== undefined) changes.push(`name → "${data.name}"`);
   if (data.role !== undefined) changes.push(`role → ${data.role}`);
   if (data.disabled !== undefined) changes.push(`disabled → ${data.disabled}`);
+  if (data.passwordChangeRequired !== undefined)
+    changes.push(`passwordChangeRequired → ${data.passwordChangeRequired}`);
   if (data.password !== undefined) changes.push("password reset");
 
   await logAction({
@@ -160,6 +173,7 @@ export async function PATCH(
       name: updated.name,
       role: updated.role,
       disabled: updated.disabled,
+      passwordChangeRequired: updated.passwordChangeRequired,
     },
   });
 

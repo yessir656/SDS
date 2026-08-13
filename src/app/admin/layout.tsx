@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AdminSessionProvider } from "@/components/admin/session-provider";
+import { PasswordGuard } from "@/components/admin/password-guard";
 
 export const metadata: Metadata = {
   title: "SDS-CHEM Admin",
@@ -13,7 +14,9 @@ export default function AdminLayout({
 }) {
   return (
     <AdminSessionProvider>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950">{children}</div>
+      <PasswordGuard>
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950">{children}</div>
+      </PasswordGuard>
     </AdminSessionProvider>
   );
 }

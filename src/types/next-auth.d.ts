@@ -9,12 +9,14 @@ declare module "next-auth" {
     user: {
       id: string;
       role: "SUPER_ADMIN" | "ADMIN" | "USER";
+      passwordChangeRequired?: boolean;
     } & DefaultSession["user"];
   }
 
   interface User {
     id: string;
     role: "SUPER_ADMIN" | "ADMIN" | "USER";
+    passwordChangeRequired?: boolean;
   }
 }
 
@@ -22,5 +24,6 @@ declare module "next-auth/jwt" {
   interface JWT {
     id: string;
     role: "SUPER_ADMIN" | "ADMIN" | "USER";
+    passwordChangeRequired?: boolean;
   }
 }

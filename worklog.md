@@ -135,3 +135,83 @@ Stage Summary:
 - Files created: src/lib/audit.ts, src/app/api/admin/users/route.ts, src/app/api/admin/users/[id]/route.ts, src/app/api/admin/audit/route.ts, src/components/admin/user-manager.tsx, src/components/admin/audit-log-viewer.tsx (6 new files).
 - Files modified: prisma/schema.prisma, src/types/next-auth.d.ts, src/lib/auth.ts, src/lib/session.ts, src/middleware.ts, scripts/seed-db.ts, src/app/api/admin/chemicals/route.ts, src/app/api/admin/chemicals/[id]/route.ts, src/app/api/admin/sds/route.ts, src/app/api/admin/sds/[id]/route.ts, src/app/admin/page.tsx (11 modified files).
 - August 12 meeting notes (aug12-meeting.md) preserved untouched. Action items NOT implemented (per original instruction).
+
+---
+Task ID: PHASE-D-1
+Agent: Orchestrator
+Task: Implement Phase D (System Settings tab — super-admin only) with AI provider config + test connection, storage info, sync status, database info, system runtime info. Then add "password change on next login" feature for newly created admins.
+
+Work Log:
+
+Phase D — System Settings:
+- Added two new exported functions to src/lib/ai-vlm.ts:
+  * getProviderInfo() — read-only snapshot of current AI provider config (provider, model, apiKeyConfigured, apiKeyHint masked, sdkInstalled, notes). Never returns the actual API key.
+  * testProviderConnection() — sends a minimal text-only prompt ('Reply with the JSON {"ok":true}') to the configured provider and returns ok/fail + latencyMs + responsePreview + error. Does NOT send any image and does NOT touch the database.
+  * Also added maskKey() and isModuleInstalled() helpers. isModuleInstalled uses fs.existsSync (not require.resolve) because the Next.js Turbopack bundler mishandles require.resolve for subpaths.
+- Created src/app/api/admin/system/info/route.ts: GET endpoint (SUPER_ADMIN only) returning 5 info blocks:
+  * ai: provider config from getProviderInfo()
+  * storage: walks storage/sds/ directory, returns totalBytes, fileCount, largestFile, averageBytes, dir path
+  * sync: chemical/SDS/user/auditLog counts, lastUpdatedAt, maxServerVersion (7 parallel DB queries)
+  * database: SQLite file size, path, connection URL
+  * system: nodeVersion, platform, arch, environment, nextjsVersion (read from node_modules/next/package.json via fs), uptimeSeconds, currentTime, timezone
+- Created src/app/api/admin/system/test-ai/route.ts: POST endpoint (SUPER_ADMIN only) that calls testProviderConnection() and logs the result to the audit log (action: system.test-ai).
+- Created src/components/admin/system-settings.tsx: full UI with 5 cards (AI Provider, Storage, Database, Sync & Data, System Runtime). AI Provider card has a "Test Connection" button that shows live result (ok/failed + latency + response preview). All values formatted human-readably (bytes, durations, timestamps).
+- Updated src/app/admin/page.tsx: added 6th tab "System" (Settings icon) visible only to SUPER_ADMIN. Admin dashboard now has 6 tabs: Overview, Chemicals, SDS Documents, Users, Audit Log, System.
+
+Phase D Testing (Agent Browser):
+- ✅ System tab renders all 5 cards with live data: provider=zai, model=glm-4.6v, API key=auto (sandbox), SDK installed=yes, 14 SDS files, 14.7 KB total, SQLite 148 KB, 14 chemicals, 2 users, 3 audit entries, Node v24.18.0, Next.js 16.1.3, DEVELOPMENT, linux/x64, uptime, UTC timezone.
+- ✅ "Test Connection" button: clicked → returned "OK — 621ms" with response preview '```json {"ok":true} ```'.
+- ✅ Audit Log captured the test: action=system.test-ai, summary="Tested AI provider 'zai' → OK (621ms)".
+- ✅ Screenshots: verify-system-settings.png, verify-system-settings-tested.png.
+
+Bug fix during Phase D:
+- Initial implementation used require.resolve("next/package.json") to read the Next.js version. This caused a build error: "Module not found: Can't resolve './ROOT/node_modules/next/package.json' — server relative imports are not implemented yet." Fixed by switching to fs.readFileSync with candidate paths. Also switched isModuleInstalled() from require.resolve to fs.existsSync for consistency.
+
+Password Change on Next Login:
+- Updated prisma/schema.prisma: added `passwordChangeRequired Boolean @default(false)` to User model. Ran bun run db:push — additive migration, no data loss.
+- Updated src/types/next-auth.d.ts: added `passwordChangeRequired?: boolean` to Session.user, User, and JWT interfaces.
+- Updated src/lib/auth.ts:
+  * authorize() now returns passwordChangeRequired in the user object.
+  * jwt callback: persists passwordChangeRequired into JWT on sign-in. Also handles trigger === "update": when the client calls useSession().update(), re-fetches the user's passwordChangeRequired + role from DB so a just-completed password change is reflected without requiring a fresh sign-in.
+  * session callback: copies passwordChangeRequired from JWT into session.
+- Updated src/lib/session.ts: requireAdmin() and requireSuperAdmin() now BOTH block users with passwordChangeRequired === true. This is defense-in-depth — even if the client-side PasswordGuard is bypassed, the API will return 401. The only API route accessible to password-change-required users is /api/admin/change-password (which uses getServerSession directly, not requireAdmin).
+- Created src/app/api/admin/change-password/route.ts: POST endpoint (authenticated admins only). Takes currentPassword + newPassword, verifies current password against bcrypt hash, rejects if new == current, hashes new password, updates DB (passwordHash + passwordChangeRequired=false), logs to audit log (action: user.password-change).
+- Created src/app/admin/change-password/page.tsx: standalone page with 3 password fields (current, new, confirm), show/hide toggles, live validation (length >= 8, passwords match), "Change password & continue" button, "Sign out instead" button. After success: calls useSession().update() to refresh the JWT, then hard-navigates to /admin.
+- Created src/components/admin/password-guard.tsx: client-side component mounted in admin layout. Uses useSession() + usePathname() — if the current path is NOT /admin/login and NOT /admin/change-password, and the session has passwordChangeRequired === true, redirects to /admin/change-password.
+- Updated src/app/admin/layout.tsx: wrapped children with <PasswordGuard>.
+- Updated src/app/api/admin/users/route.ts: POST now accepts passwordChangeRequired (default true) and stores it. GET now returns passwordChangeRequired in the user list.
+- Updated src/app/api/admin/users/[id]/route.ts: PATCH now accepts passwordChangeRequired. When resetting a password (data.password provided), automatically sets passwordChangeRequired=true unless the super-admin explicitly sets it to false in the same PATCH. GET response includes passwordChangeRequired.
+- Updated src/components/admin/user-manager.tsx:
+  * AdminUser interface now includes passwordChangeRequired.
+  * User table: shows amber "PW change" badge next to Active status for users with passwordChangeRequired=true.
+  * CreateUserDialog: added "Require password change on next login" checkbox (default ON) with explanatory text. Form sends passwordChangeRequired in the POST body.
+  * EditUserDialog: added same checkbox, synced from target.passwordChangeRequired. When a new password is entered, shows a hint that resetting will auto-require a change unless toggled off. PATCH always sends passwordChangeRequired.
+
+Password Change Testing (Agent Browser end-to-end):
+- ✅ Created test user "testpw2@mirdc.dost.gov.ph" with "Require password change on next login" checkbox checked (default). User appeared in table with amber "PW change" badge.
+- ✅ Signed out, signed in as testpw2 → automatically redirected to /admin/change-password (PasswordGuard worked).
+- ✅ Tried navigating directly to /admin → redirected back to /admin/change-password (can't bypass).
+- ✅ Filled current password (TempPass456!) + new password (BrandNew789!) + confirm. Validation worked (length check, match check).
+- ✅ Clicked "Change password & continue" → password updated in DB, JWT refreshed via update(), redirected to /admin.
+- ✅ Dashboard rendered with 3 tabs (Overview/Chemicals/SDS — correct for regular ADMIN role, no super-admin tabs).
+- ✅ Signed out, signed back in with new password (BrandNew789!) → went straight to dashboard (no change-password redirect — flag was cleared).
+- ✅ Audit log captured: user.create with "[password change required]" suffix, user.password-change with "testpw2@mirdc.dost.gov.ph changed their own password".
+- ✅ Cleaned up: deleted both test users. Audit log shows the full lifecycle.
+- ✅ Screenshots: verify-pw-change-user-created.png, verify-pw-change-success.png, verify-pw-change-full-flow.png.
+
+Dev Server Restart:
+- The Prisma schema change (passwordChangeRequired field) required a dev server restart to reload the Prisma Client. Killed PIDs 7879/7903, restarted via python3 .zscripts/dev-daemon.py. New PIDs: 11873/11887. Port 3000 remained available.
+
+Final Verification:
+- ✅ ESLint clean on all 14 changed/new files (the only repo-wide lint error is in a pre-existing example file upload/SDS-extracted/SDS-main/examples/websocket/frontend.tsx, unrelated).
+- ✅ All public routes still 200: /, /api/chemicals, /api/sync?since=0.
+- ✅ All admin APIs still 401 for unauth: /api/admin/users, /api/admin/system/info, /api/admin/change-password.
+- ✅ No console errors or React warnings in the browser.
+- ✅ Dev server healthy on port 3000.
+
+Stage Summary:
+- Phase D (System Settings) complete: super-admins can view live system info (AI provider, storage, database, sync stats, runtime) and test the AI connection with one click. All values are read-only (config changes still require editing .env + restart, by design — runtime config mutation is a future enhancement).
+- Password Change on Next Login complete: super-admins can force new users (or existing users after a password reset) to change their password on next login. The enforcement is triple-layered: (1) client-side PasswordGuard redirects to /admin/change-password, (2) server-side requireAdmin/requireSuperAdmin block API calls from password-change-required users, (3) the change-password API verifies the current password before accepting the new one. The JWT is refreshed via useSession().update() after a successful change so the user doesn't need to sign out + back in.
+- Files created (7): src/app/api/admin/system/info/route.ts, src/app/api/admin/system/test-ai/route.ts, src/components/admin/system-settings.tsx, src/app/api/admin/change-password/route.ts, src/app/admin/change-password/page.tsx, src/components/admin/password-guard.tsx.
+- Files modified (9): src/lib/ai-vlm.ts (added getProviderInfo + testProviderConnection + helpers), src/lib/auth.ts (JWT update trigger handling + passwordChangeRequired), src/lib/session.ts (block passwordChangeRequired users), src/types/next-auth.d.ts (added passwordChangeRequired), src/app/admin/layout.tsx (PasswordGuard), src/app/admin/page.tsx (System tab), src/app/api/admin/users/route.ts (passwordChangeRequired in create + list), src/app/api/admin/users/[id]/route.ts (passwordChangeRequired in patch + auto-set on password reset), src/components/admin/user-manager.tsx (checkbox in create/edit dialogs + PW change badge in table), prisma/schema.prisma (passwordChangeRequired field).
+- All existing functionality preserved. August 12 meeting notes untouched. Phase B (division scoping) explicitly skipped per user request. Force-logout feature skipped per user request.

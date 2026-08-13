@@ -29,6 +29,8 @@
 // ============================================================================
 
 import type { Buffer } from "node:buffer";
+import fs from "fs";
+import path from "path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -457,5 +459,212 @@ async function callAnthropic(
     const msg = err instanceof Error ? err.message : String(err);
     const status = (err as any)?.status;
     throw new AiRequestError(`Anthropic request failed: ${msg}`, status);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Introspection + health check (used by /api/admin/system/*)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read-only snapshot of the current AI provider configuration.
+ * Never returns the actual API key — only whether one is set.
+ */
+export function getProviderInfo() {
+  const provider = resolveProvider();
+  const env = process.env;
+
+  const info: {
+    provider: AiProvider;
+    model: string;
+    apiKeyConfigured: boolean;
+    apiKeyHint: string | null;
+    sdkInstalled: boolean;
+    notes: string;
+  } = {
+    provider,
+    model: "",
+    apiKeyConfigured: false,
+    apiKeyHint: null,
+    sdkInstalled: false,
+    notes: "",
+  };
+
+  switch (provider) {
+    case "zai":
+      info.model = "glm-4.6v";
+      info.apiKeyConfigured = true; // auto-configured via /etc/.z-ai-config
+      info.apiKeyHint = "auto (sandbox)";
+      info.sdkInstalled = isModuleInstalled("z-ai-web-dev-sdk");
+      info.notes =
+        "In-house provider. Auto-configured on the Z.ai cloud sandbox. " +
+        "Not available on local machines — use Gemini instead.";
+      break;
+    case "gemini":
+      info.model = env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
+      info.apiKeyConfigured = !!env.GEMINI_API_KEY?.trim();
+      info.apiKeyHint = maskKey(env.GEMINI_API_KEY);
+      info.sdkInstalled = isModuleInstalled("@google/generative-ai");
+      info.notes =
+        "Recommended for local development. Free tier: 1,500 req/day. " +
+        "Get a key at https://aistudio.google.com/apikey";
+      break;
+    case "openai":
+      info.model = env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+      info.apiKeyConfigured = !!env.OPENAI_API_KEY?.trim();
+      info.apiKeyHint = maskKey(env.OPENAI_API_KEY);
+      info.sdkInstalled = isModuleInstalled("openai");
+      info.notes = "Get a key at https://platform.openai.com/api-keys";
+      break;
+    case "anthropic":
+      info.model = env.ANTHROPIC_MODEL?.trim() || "claude-3-5-sonnet-20241022";
+      info.apiKeyConfigured = !!env.ANTHROPIC_API_KEY?.trim();
+      info.apiKeyHint = maskKey(env.ANTHROPIC_API_KEY);
+      info.sdkInstalled = isModuleInstalled("@anthropic-ai/sdk");
+      info.notes = "Get a key at https://console.anthropic.com/settings/keys";
+      break;
+  }
+
+  return info;
+}
+
+/** Mask an API key for display: show only the first 4 + last 4 characters. */
+function maskKey(key: string | undefined): string | null {
+  const k = key?.trim();
+  if (!k) return null;
+  if (k.length <= 12) return "•".repeat(k.length);
+  return `${k.slice(0, 4)}${"•".repeat(Math.max(8, k.length - 8))}${k.slice(-4)}`;
+}
+
+/** Check whether a node module is installed by looking for its package.json
+ *  in node_modules. Uses fs instead of require.resolve because the Next.js
+ *  Turbopack bundler mishandles require.resolve for some package names. */
+function isModuleInstalled(name: string): boolean {
+  const candidates = [
+    path.join(process.cwd(), "node_modules", name, "package.json"),
+    path.join(process.cwd(), "..", "node_modules", name, "package.json"),
+  ];
+  return candidates.some((p) => {
+    try {
+      return fs.existsSync(p);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Send a minimal text-only prompt to the configured provider to verify the
+ * API key works and the model is reachable. Does NOT send any image.
+ *
+ * Used by the System Settings → "Test Connection" button.
+ */
+export async function testProviderConnection(): Promise<{
+  ok: boolean;
+  provider: AiProvider;
+  model: string;
+  latencyMs: number;
+  responsePreview: string;
+  error?: string;
+}> {
+  const provider = resolveProvider();
+  assertProviderConfigured(provider);
+
+  const startedAt = Date.now();
+  const testPrompt = 'Reply with exactly the JSON: {"ok":true}';
+
+  try {
+    let text = "";
+    let model = "";
+
+    switch (provider) {
+      case "zai": {
+        const ZAI = (await import("z-ai-web-dev-sdk")).default;
+        const zai = await ZAI.create();
+        const resp = await zai.chat.completions.create({
+          model: "glm-4.6v",
+          messages: [{ role: "user", content: testPrompt }],
+        } as Parameters<typeof zai.chat.completions.create>[0]);
+        text = resp?.choices?.[0]?.message?.content ?? "";
+        model = "glm-4.6v";
+        break;
+      }
+      case "gemini": {
+        const mod = await import("@google/generative-ai");
+        const GoogleGenerativeAI = mod.GoogleGenerativeAI;
+        const apiKey = process.env.GEMINI_API_KEY!.trim();
+        const modelId = process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash";
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const generativeModel = genAI.getGenerativeModel({
+          model: modelId,
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 64,
+            responseMimeType: "application/json",
+          },
+        });
+        const result = await generativeModel.generateContent({
+          contents: [{ role: "user", parts: [{ text: testPrompt }] }],
+        });
+        text = result?.response?.text?.() ?? "";
+        model = modelId;
+        break;
+      }
+      case "openai": {
+        const mod = await import("openai");
+        const OpenAI = mod.default ?? mod.OpenAI;
+        const openai = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY!.trim(),
+        });
+        const modelId = process.env.OPENAI_MODEL?.trim() || "gpt-4o-mini";
+        const resp = await openai.chat.completions.create({
+          model: modelId,
+          messages: [{ role: "user", content: testPrompt }],
+          max_tokens: 64,
+          temperature: 0,
+        });
+        text = resp?.choices?.[0]?.message?.content ?? "";
+        model = modelId;
+        break;
+      }
+      case "anthropic": {
+        const mod = await import("@anthropic-ai/sdk");
+        const Anthropic = mod.default ?? mod.Anthropic;
+        const anthropic = new Anthropic({
+          apiKey: process.env.ANTHROPIC_API_KEY!.trim(),
+        });
+        const modelId =
+          process.env.ANTHROPIC_MODEL?.trim() || "claude-3-5-sonnet-20241022";
+        const resp = await anthropic.messages.create({
+          model: modelId,
+          max_tokens: 64,
+          messages: [{ role: "user", content: testPrompt }],
+        });
+        text = (resp?.content ?? [])
+          .filter((c: any) => c.type === "text")
+          .map((c: any) => c.text ?? "")
+          .join("\n");
+        model = modelId;
+        break;
+      }
+    }
+
+    return {
+      ok: true,
+      provider,
+      model,
+      latencyMs: Date.now() - startedAt,
+      responsePreview: text.slice(0, 200),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      provider,
+      model: "",
+      latencyMs: Date.now() - startedAt,
+      responsePreview: "",
+      error: msg,
+    };
   }
 }

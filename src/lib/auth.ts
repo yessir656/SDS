@@ -65,16 +65,31 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name ?? undefined,
           role: user.role as "SUPER_ADMIN" | "ADMIN" | "USER",
+          passwordChangeRequired: user.passwordChangeRequired,
         };
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       // `user` is only present on first sign-in; persist id + role into JWT.
       if (user) {
         token.id = user.id;
         token.role = (user as { role: "SUPER_ADMIN" | "ADMIN" | "USER" }).role;
+        token.passwordChangeRequired = (user as { passwordChangeRequired?: boolean }).passwordChangeRequired;
+      }
+      // When the client calls useSession().update(), re-fetch the user's
+      // passwordChangeRequired flag from the DB so a just-completed password
+      // change is reflected without requiring a fresh sign-in.
+      if (trigger === "update" && token.id) {
+        const fresh = await db.user.findUnique({
+          where: { id: token.id },
+          select: { passwordChangeRequired: true, role: true },
+        });
+        if (fresh) {
+          token.passwordChangeRequired = fresh.passwordChangeRequired;
+          token.role = fresh.role as "SUPER_ADMIN" | "ADMIN" | "USER";
+        }
       }
       return token;
     },
@@ -82,6 +97,7 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = token.id;
         session.user.role = token.role;
+        session.user.passwordChangeRequired = token.passwordChangeRequired;
       }
       return session;
     },

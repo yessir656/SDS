@@ -23,6 +23,7 @@ import {
   Users,
   ShieldCheck,
   ScrollText,
+  Settings,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,7 @@ import { ChemicalManager } from "@/components/admin/chemical-manager";
 import { SdsManager } from "@/components/admin/sds-manager";
 import { UserManager } from "@/components/admin/user-manager";
 import { AuditLogViewer } from "@/components/admin/audit-log-viewer";
+import { SystemSettings } from "@/components/admin/system-settings";
 
 export default function AdminDashboardPage() {
   const { data: session, status } = useSession();
@@ -137,6 +139,12 @@ export default function AdminDashboardPage() {
                 Audit Log
               </TabsTrigger>
             )}
+            {isSuperAdmin && (
+              <TabsTrigger value="system" className="gap-2">
+                <Settings className="h-4 w-4" />
+                System
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="overview">
@@ -156,6 +164,11 @@ export default function AdminDashboardPage() {
           {isSuperAdmin && (
             <TabsContent value="audit">
               <AuditLogViewer />
+            </TabsContent>
+          )}
+          {isSuperAdmin && (
+            <TabsContent value="system">
+              <SystemSettings />
             </TabsContent>
           )}
         </Tabs>

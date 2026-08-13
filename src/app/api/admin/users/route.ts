@@ -30,6 +30,7 @@ export async function GET(request: Request) {
       name: true,
       role: true,
       disabled: true,
+      passwordChangeRequired: true,
       lastLoginAt: true,
       createdAt: true,
       updatedAt: true,
@@ -55,6 +56,7 @@ const createUserSchema = z.object({
   password: z.string().min(8).max(128),
   name: z.string().min(1).max(120).optional(),
   role: z.enum(["ADMIN", "SUPER_ADMIN"]).default("ADMIN"),
+  passwordChangeRequired: z.boolean().default(true),
 });
 
 export async function POST(request: Request) {
@@ -97,6 +99,7 @@ export async function POST(request: Request) {
       name: data.name ?? null,
       passwordHash,
       role: data.role,
+      passwordChangeRequired: data.passwordChangeRequired,
     },
     select: {
       id: true,
@@ -104,6 +107,7 @@ export async function POST(request: Request) {
       name: true,
       role: true,
       disabled: true,
+      passwordChangeRequired: true,
       createdAt: true,
     },
   });
@@ -114,8 +118,8 @@ export async function POST(request: Request) {
     action: "user.create",
     entityType: "user",
     entityId: user.id,
-    summary: `Created ${user.role} account ${email}${data.name ? ` (${data.name})` : ""}`,
-    after: { email, name: data.name ?? null, role: data.role },
+    summary: `Created ${user.role} account ${email}${data.name ? ` (${data.name})` : ""}${data.passwordChangeRequired ? " [password change required]" : ""}`,
+    after: { email, name: data.name ?? null, role: data.role, passwordChangeRequired: data.passwordChangeRequired },
   });
 
   return NextResponse.json(

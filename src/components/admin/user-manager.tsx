@@ -70,6 +70,7 @@ interface AdminUser {
   name: string | null;
   role: "SUPER_ADMIN" | "ADMIN" | "USER";
   disabled: boolean;
+  passwordChangeRequired: boolean;
   lastLoginAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -276,6 +277,16 @@ export function UserManager() {
                               Active
                             </Badge>
                           )}
+                          {u.passwordChangeRequired && !u.disabled && (
+                            <Badge
+                              variant="outline"
+                              className="ml-1 gap-1 border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                              title="User must change their password on next login"
+                            >
+                              <KeyRound className="h-3 w-3" />
+                              PW change
+                            </Badge>
+                          )}
                         </td>
                         <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
                           {formatRelative(u.lastLoginAt)}
@@ -401,6 +412,7 @@ function CreateUserDialog({
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"ADMIN" | "SUPER_ADMIN">("ADMIN");
+  const [requirePasswordChange, setRequirePasswordChange] = useState(true);
   const [saving, setSaving] = useState(false);
 
   function reset() {
@@ -408,6 +420,7 @@ function CreateUserDialog({
     setName("");
     setPassword("");
     setRole("ADMIN");
+    setRequirePasswordChange(true);
   }
 
   async function handleCreate() {
@@ -429,6 +442,7 @@ function CreateUserDialog({
           name: name.trim() || undefined,
           password,
           role,
+          passwordChangeRequired: requirePasswordChange,
         }),
       });
       if (!res.ok) {
@@ -487,8 +501,7 @@ function CreateUserDialog({
               autoComplete="new-password"
             />
             <p className="text-xs text-muted-foreground">
-              Communicate this securely to the user. They can change it after
-              first sign-in (planned feature).
+              Communicate this securely to the user.
             </p>
           </div>
           <div className="space-y-2">
@@ -508,6 +521,25 @@ function CreateUserDialog({
               </SelectContent>
             </Select>
           </div>
+          <label
+            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30"
+            htmlFor="cu-force-pw"
+          >
+            <input
+              id="cu-force-pw"
+              type="checkbox"
+              checked={requirePasswordChange}
+              onChange={(e) => setRequirePasswordChange(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-input"
+            />
+            <div className="space-y-0.5">
+              <div className="text-sm font-medium">Require password change on next login</div>
+              <div className="text-xs text-muted-foreground">
+                User will be redirected to a password-change page before they
+                can reach the dashboard. Recommended for temporary passwords.
+              </div>
+            </div>
+          </label>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -543,6 +575,7 @@ function EditUserDialog({
   const [role, setRole] = useState<"ADMIN" | "SUPER_ADMIN">("ADMIN");
   const [disabled, setDisabled] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  const [requirePwChange, setRequirePwChange] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Sync form state when target changes.
@@ -551,6 +584,7 @@ function EditUserDialog({
       setName(target.name ?? "");
       setRole(target.role === "SUPER_ADMIN" ? "SUPER_ADMIN" : "ADMIN");
       setDisabled(target.disabled);
+      setRequirePwChange(target.passwordChangeRequired);
       setNewPassword("");
     }
   }, [target]);
@@ -563,6 +597,7 @@ function EditUserDialog({
         name: name.trim() || null,
         role,
         disabled,
+        passwordChangeRequired: requirePwChange,
       };
       if (newPassword) {
         if (newPassword.length < 8) {
@@ -668,7 +703,32 @@ function EditUserDialog({
               placeholder="Leave blank to keep current password"
               autoComplete="new-password"
             />
+            {newPassword && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Resetting the password will automatically require a change on
+                next login unless you toggle that off below.
+              </p>
+            )}
           </div>
+          <label
+            className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/30"
+            htmlFor="eu-force-pw"
+          >
+            <input
+              id="eu-force-pw"
+              type="checkbox"
+              checked={requirePwChange}
+              onChange={(e) => setRequirePwChange(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-input"
+            />
+            <div className="space-y-0.5">
+              <div className="text-sm font-medium">Require password change on next login</div>
+              <div className="text-xs text-muted-foreground">
+                User will be redirected to a password-change page before they
+                can reach the dashboard.
+              </div>
+            </div>
+          </label>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
