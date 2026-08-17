@@ -604,3 +604,41 @@ Stage Summary:
 - Manifest theme_color corrected to navy #0a2540 (was stale teal).
 - Files modified: src/app/layout.tsx (metadata.icons), public/manifest.json (full rewrite).
 - Files regenerated: public/icons/icon-16.png, icon-32.png, icon-192.png, icon-512.png, icon-maskable-192.png, icon-maskable-512.png, icon.svg, public/logo.svg.
+
+---
+Task ID: DOCS-UPDATE-1
+Agent: Orchestrator
+Task: Update DEVELOPER_GUIDE.md, ADMIN_GUIDE.md, README.md, and worklog.md to reflect the navy rebrand, pagination, Phase E fixes, favicon/PWA icon regeneration, and trustHost auth change — so the docs match the code before the user transfers the project to their local PC.
+
+Work Log:
+- DEVELOPER_GUIDE.md (856 → 915 lines):
+  - §0.2 step 4: NEXTAUTH_URL is now UNSET (trustHost: true handles gateway + localhost).
+  - §3 Library code: auth.ts notes trustHost; session.ts notes stale-JWT defense (getFreshUserState + 60s cache + invalidateUserStateCache); validation.ts notes name is .nullable().optional(); pdf-rasterize.ts notes v6 type casts; seed-data.ts notes sdsDocumentId="" placeholders; serialize.ts notes sdsDocument relation include.
+  - §3 added new "Hooks" subsection listing use-pagination.ts.
+  - §3 public/ section: manifest.json notes navy theme #0a2540 + DOST-MIRDC icons; added dost-mirdc-logo.png; icons/ notes 16/32/192/512 + maskable + SVG all regenerated from logo.
+  - §3 .env block: NEXTAUTH_URL intentionally UNSET explanation.
+  - §8 Security Model: added "trustHost: true" bullet in Authentication; added full "Stale-JWT defense (Phase E10)" subsection explaining getFreshUserState + 60s TTL + invalidateUserStateCache + which routes call it; updated Authorization section to mention stale-JWT check in requireAdmin/requireSuperAdmin, the bare /admin matcher fix, and the 405-before-401 guard (E4).
+  - §9 PWA Behavior: teal #0d9488 → navy #0a2540; documented favicon metadata.icons (16/32/192/SVG); documented maskable 80% safe zone; noted installed app icon shows DOST-MIRDC logo.
+  - §15 Project Status: added Phase E (E1-E10 detailed), trustHost, DOST-MIRDC navy rebrand, Pagination (Phase F0) with all 4 views + page sizes + the render-phase setState pattern.
+  - §16 Anti-Hallucination "CURRENTLY IMPLEMENTED" table: added 7 new rows (Stale-JWT defense, trustHost, navy theme, logo integration, PWA icons, Pagination, serializeChemical sdsDocument include).
+  - §16 "DEPRECATED / RETIRED" table: added 4 new rows (teal-* color classes, NEXTAUTH_URL env var, old PWA icon files, fake sdsDocumentId seed data).
+- ADMIN_GUIDE.md:
+  - Added branding note at top (navy blue #0a2540, DOST-MIRDC logo locations).
+  - §4.2 Chemicals: added pagination note (10/page, resets on search).
+  - §4.3 SDS: added pagination note (10/page).
+  - §4.5 Users: added pagination note (10/page, usually hidden).
+  - §4.6 Audit Log: clarified "Load older entries" cursor pagination; fixed filter list (removed "session", kept "system" — E2 fix).
+  - §7 Troubleshooting: added NextAuth Configuration error row (trustHost fix), stale-JWT defense row (E10), favicon cache row.
+- README.md:
+  - Header: "MIRDC" → "DOST-MIRDC" with full agency name; added branding callout.
+  - Design Decisions / Visual Direction: teal-emerald → DOST-MIRDC navy blue (#0a2540, 11-shade palette); documented logo integration.
+  - Key Features: PWA row updated (navy theme + DOST-MIRDC logo icons); added 3 new feature rows (Pagination, Stale-JWT Defense, DOST-MIRDC Branding).
+- Verification:
+  - grep for "teal" in all 3 docs: only intentional references (retired/replaced contexts, deprecated tables, troubleshooting). No stale "use teal" instructions.
+  - Dev server: GET / → 200, GET /admin/login → 200, GET /icons/icon-32.png → 200.
+  - bun run lint: src/ clean (only pre-existing upload/ example error).
+
+Stage Summary:
+- All 3 user-facing docs (README, ADMIN_GUIDE, DEVELOPER_GUIDE) now accurately reflect the current codebase state: navy blue DOST-MIRDC branding, pagination, Phase E security fixes, trustHost auth, regenerated PWA icons.
+- The worklog (this file) already contains detailed entries for every task: UI-REDESIGN-1 (navy rebrand), PAGINATION-1 (pagination), FAVICON-1 (PWA icons), and now DOCS-UPDATE-1.
+- The project is ready for the user to transfer to their local PC — the docs won't mislead them about env vars, colors, security model, or features.

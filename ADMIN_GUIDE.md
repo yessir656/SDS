@@ -1,8 +1,10 @@
 # SDS-CHEM — Administrator Guide
 
-**Audience:** Laboratory administrators / Safety officers at MIRDC responsible for managing the chemical catalog and Safety Data Sheets.
+**Audience:** Laboratory administrators / Safety officers at DOST-MIRDC responsible for managing the chemical catalog and Safety Data Sheets.
 
 **Purpose:** Everything an admin needs to log in, manage chemicals, upload SDS PDFs, and understand how changes reach the field devices.
+
+> **Branding note (v2):** The system is now themed in **DOST-MIRDC navy blue** (`#0a2540`) with the official DOST-MIRDC logo in the header, footer, login page, and browser tab favicon. The earlier teal theme has been retired.
 
 ---
 
@@ -111,6 +113,8 @@ A searchable, sortable table of every chemical. Each row shows:
 - Storage location & department
 - SDS status badge (Placeholder / Available)
 
+> **Pagination:** the table shows **10 chemicals per page**. Use the page-number footer at the bottom to navigate (Previous / 1 / 2 / … / Next). Typing in the search box automatically resets to page 1.
+
 **Actions:**
 | Action | What it does |
 |---|---|
@@ -120,6 +124,8 @@ A searchable, sortable table of every chemical. Each row shows:
 
 ### 4.3 SDS  (all admins)
 Manage the actual PDF files. Each chemical has exactly one SDS document (1:1).
+
+> **Pagination:** the SDS table shows **10 rows per page** with the same page-number footer as the Chemicals tab.
 
 **Actions:**
 | Action | What it does |
@@ -134,6 +140,8 @@ Manage the actual PDF files. Each chemical has exactly one SDS document (1:1).
 ## 4.5 Users Tab  (SUPER_ADMIN only)
 
 Manage admin accounts. Searchable table showing each user's name, email, role, status (Active / Disabled / PW change required), and last login time.
+
+> **Pagination:** the Users table shows **10 users per page**. (Most installations have fewer than 10 admins, so the footer is usually hidden.)
 
 **Actions:**
 | Action | What it does |
@@ -153,10 +161,10 @@ Manage admin accounts. Searchable table showing each user's name, email, role, s
 
 ## 4.6 Audit Log Tab  (SUPER_ADMIN only)
 
-Every mutating admin action is recorded in an append-only audit log. The viewer shows the newest entries first, with cursor-based pagination.
+Every mutating admin action is recorded in an append-only audit log. The viewer shows the newest entries first, with cursor-based pagination (a **"Load older entries"** button at the bottom appends the next 50 entries).
 
 **Filters:**
-- **Entity type** — `chemical`, `sds`, `user`, `session`, `system`
+- **Entity type** — `chemical`, `sds`, `user`, `system`
 - **Action prefix** — e.g. `chemical.` to see all chemical mutations, or `user.` for user-management actions
 
 Each row shows: timestamp, actor (email), action, summary, and IP address. Click a row to expand and inspect the **before / after** JSON snapshots (for updates and deletes) or the **after** snapshot (for creates).
@@ -313,12 +321,15 @@ You do **not** need to tell anyone to refresh. The system is **offline-first wit
 |---|---|---|
 | Admin page shows a blank "Z" logo screen | Dev server not running | Run `bun run dev` in the project; check the Preview Panel |
 | "Invalid email or password" on login | Wrong credentials, or admin not seeded | Verify `.env`, then `bun run db:seed`, then retry |
+| **NextAuth "Configuration" error after sign-in** | `NEXTAUTH_URL` was hardcoded but the app is accessed via the preview gateway URL | Fixed — the app now uses `trustHost: true`. If you have an old `.env` with `NEXTAUTH_URL=...`, **delete that line** and restart. |
 | `/admin` redirects to `/admin/login` in a loop | Session cookie not set | Clear browser cookies for the site, log in again |
 | SDS upload rejected with "Invalid file" | File is not a real PDF, or wrong extension | Re-export as PDF from the original source |
 | Field device not seeing your changes | Device is offline, or sync error | Have the user open the app while online; tap the sync status indicator to retry |
 | Public catalog shows stale data after admin edit | Sync hasn't fired yet | Sync runs on startup / online transition / periodically. A page refresh while online forces a re-check. |
 | Field user still sees the old placeholder PDF after you uploaded the real one | IndexedDB cache lag (fixed) | The public "View SDS PDF" button now always fetches fresh from the server when online. Ask the user to hard-refresh once. Confirm the SDS `version` incremented in the admin SDS tab. |
 | Dashboard shows 0 chemicals | Database not seeded | `bun run db:push && bun run db:seed`, then restart |
+| **Downgraded or disabled admin can still access the dashboard** | ~~Stale JWT~~ **Fixed (Phase E10)** — every admin API call now checks the DB for the user's current `disabled`/`role` state (cached 60s). A disabled user's next API call returns 401 within 60 seconds. | No action needed — the stale-JWT defense is automatic. |
+| **Favicon still shows old teal shield icon** | Browser cached the old favicon | Hard-refresh (Ctrl+Shift+R / Cmd+Shift+R) or close & reopen the tab. The server is already serving the DOST-MIRDC logo icon. |
 | "Auto-fill failed: spawn pdftoppm ENOENT" | ~~Poppler not installed~~ **Fixed** — the app now uses a pure-JavaScript PDF renderer. If you see this error, pull the latest code and run `bun install`. |
 | "Extraction failed: Configuration file not found or invalid" | You're running on a local machine. The default `zai` provider only works on the Z.ai cloud sandbox. Set `AI_PROVIDER=gemini` + `GEMINI_API_KEY` in `.env` (see [§ 4.4 Setup for local development](#setup-for-local-development-when-not-using-the-sandbox)). |
 | "AI_PROVIDER=gemini is set but GEMINI_API_KEY is missing" | You set the provider but didn't add the API key. Get a free key at https://aistudio.google.com/apikey, set `GEMINI_API_KEY=...` in `.env`, restart `bun run dev`. |

@@ -1,0 +1,357 @@
+     1→   500→   500→### Where the AI code lives
+     2→   501→   501→
+     3→   502→   502→| File | Role |
+     4→   503→   503→|---|---|
+     5→   504→   504→| `src/lib/ai-vlm.ts` | Provider abstraction: `resolveProvider()`, `assertProviderConfigured()`, `callVlm()`, and per-provider functions `callZai()`, `callGemini()`, `callOpenai()`, `callAnthropic()`. |
+     6→   505→   505→| `src/lib/pdf-rasterize.ts` | PDF → PNG conversion (pdfjs-dist + @napi-rs/canvas). Returns `Buffer[]` (one per page, max 5). |
+     7→   506→   506→| `src/app/api/admin/sds/extract/route.ts` | The API endpoint. Validates file, calls rasterize + callVlm, parses + sanitizes response. |
+     8→   507→   507→| `src/components/admin/chemical-manager.tsx` | Frontend: the "Auto-fill from PDF" button + form-merge logic. |
+     9→   508→   508→| `src/types/ai-providers.d.ts` | TypeScript module declarations for the optional (not-pre-installed) `openai` and `@anthropic-ai/sdk` packages. |
+    10→   509→   509→
+    11→   510→   510→---
+    12→   511→   511→
+    13→   512→   512→## 7. Sync Engine (`src/lib/sync-engine.ts`)
+    14→   513→   513→
+    15→   514→   514→### Trigger points
+    16→   515→   515→1. **App startup** — fires once Dexie is initialized.
+    17→   516→   516→2. **Offline → online transition** — `use-online-status` hook notifies the engine.
+    18→   517→   517→3. **Periodic** — runs every few minutes while online.
+    19→   518→   518→
+    20→   519→   519→### Algorithm
+    21→   520→   520→```
+    22→   521→   521→1. Acquire mutex (in Dexie.syncMeta) — prevents concurrent syncs across tabs.
+    23→   522→   522→2. Read lastSyncTimestamp from syncMeta.
+    24→   523→   523→3. GET /api/sync?since=<lastSyncTimestamp>.
+    25→   524→   524→4. For each chemical in response:
+    26→   525→   525→   - If deleted (deletedAt > since) → remove from Dexie.chemicals.
+    27→   526→   526→   - Else → upsert into Dexie.chemicals.
+    28→   527→   527→5. For each sdsDocument in response:
+    29→   528→   528→   - Upsert metadata into Dexie.sdsDocuments.
+    30→   529→   529→   - Compare version with Dexie.sdsBlobs.
+    31→   530→   530→     - If version unchanged AND blob exists → skip (no re-download).
+    32→   531→   531→     - If version changed OR blob missing → GET /api/sds/[id]/download,
+    33→   532→   532→       store Blob in Dexie.sdsBlobs with new version.
+    34→   533→   533→6. Persist new lastSyncTimestamp = response.serverTime.
+    35→   534→   534→7. Release mutex. Update Zustand sync status.
+    36→   535→   535→```
+    37→   536→   536→
+    38→   537→   537→### Rate limiting
+    39→   538→   538→A minimum interval between sync attempts prevents hammering the server on flaky connections. Manual retry from the UI bypasses the interval once.
+    40→   539→   539→
+    41→   540→   540→### Status states (the `SyncStatus` type)
+    42→   541→   541→| State | Meaning |
+    43→   542→   542→|---|---|
+    44→   543→   543→| `offline` | Navigator reports offline. No sync attempts. |
+    45→   544→   544→| `syncing` | A sync is in progress. |
+    46→   545→   545→| `synced` | Last sync completed successfully and we're online. |
+    47→   546→   546→| `local-changes` | *(reserved)* user has local-only changes that couldn't be pushed (currently preferences only — always local). |
+    48→   547→   547→| `error` | Last sync attempt failed. UI shows a retry button. |
+    49→   548→   548→
+    50→   549→   549→### Conflict resolution
+    51→   550→   550→- **Chemical / SDS data:** server-wins. The latest `updatedAt` always wins.
+    52→   551→   551→- **User preferences / favorites / notes:** local-only, never synced, never overwritten.
+    53→   552→   552→
+    54→   553→   553→---
+    55→   554→   554→
+    56→   555→   555→## 8. Security Model
+    57→   556→   556→
+    58→   557→   557→### Authentication
+    59→   558→   558→- NextAuth Credentials provider.
+    60→   559→   559→- **3-tier role hierarchy**: `SUPER_ADMIN` > `ADMIN` > `USER`. Only `SUPER_ADMIN` and `ADMIN` can sign in to `/admin/*`; `USER` is reserved for the public PWA and is rejected by `authorize()`.
+    61→   560→   560→- Disabled accounts (`disabled === true`) cannot sign in.
+    62→   561→   561→- Passwords hashed with **bcrypt (12 rounds)** — never stored or logged in plaintext.
+    63→   562→   562→- JWT session strategy, 30-day max age. The JWT carries `id`, `role`, and `passwordChangeRequired`; the `session` callback copies them onto `session.user`.
+    64→   563→   563→- On `useSession().update()` (trigger `"update"`), the `jwt` callback re-fetches `passwordChangeRequired` + `role` from the DB so a just-completed password change is reflected without a fresh sign-in.
+    65→   564→   564→- Cookies: `httpOnly`, `sameSite=lax`, `secure` in production (`__Secure-` prefix).
+    66→   565→   565→
+    67→   566→   566→### Authorization (defense in depth)
+    68→   567→   567→1. **Edge middleware** (`src/middleware.ts`) — blocks `/admin/*` (except `/admin/login`) unless the JWT has `role === "SUPER_ADMIN" || role === "ADMIN"`. Fast, runs at the edge. (Super-admin-only routes enforce the stricter check server-side via `requireSuperAdmin()`.)
+    69→   568→   568→2. **`requireAdmin()`** (in `src/lib/session.ts`) — every admin API route for chemicals / SDS / dashboard / change-password-adjacent features calls this. Returns 401 if the session is missing or the user is not `ADMIN` / `SUPER_ADMIN`. **Also returns 401 if the user has `passwordChangeRequired === true`** — defense-in-depth so a bypassed client guard still can't reach the API.
+    70→   569→   569→3. **`requireSuperAdmin()`** (in `src/lib/session.ts`) — same shape as `requireAdmin()` but additionally requires `role === "SUPER_ADMIN"`. Used by user-management, audit-log, and system-settings routes. Also blocks `passwordChangeRequired` users.
+    71→   570→   570→4. **`PasswordGuard`** client component (`src/components/admin/password-guard.tsx`) — mounted in the admin layout. Uses `useSession()` + `usePathname()`; if the current path is NOT `/admin/login` and NOT `/admin/change-password`, and the session has `passwordChangeRequired === true`, hard-redirects to `/admin/change-password`.
+    72→   571→   571→
+    73→   572→   572→### Audit log
+    74→   573→   573→Every chemical / SDS / user / system mutation is logged via `logAction()` in `src/lib/audit.ts`.
+    75→   574→   574→- **Fire-and-forget**: `logAction()` wraps its `db.auditLog.create()` in a `try/catch` and only logs to `stderr` on failure. An audit-log problem can **never** break the main operation the user is trying to perform.
+    76→   575→   575→- **Captures**: `actorId`, `actorEmail` (denormalized so the row survives user deletion), `action` (dotted, e.g. `chemical.create`, `user.disable`, `system.test-ai`), `entityType`, `entityId`, `summary`, `before` / `after` JSON snapshots (built via `snapshotChemical()` for chemicals), and a best-effort `ipAddress` (from `x-forwarded-for` / `x-real-ip` via `auditContext()`).
+    77→   576→   576→- **Storage**: `AuditLog` table (append-only — no update / delete endpoints exist). Indexed on `createdAt`, `actorId`, `[entityType, entityId]`, `action`.
+    78→   577→   577→- **Viewer**: `GET /api/admin/audit` (SUPER_ADMIN only), cursor-paginated. UI: `src/components/admin/audit-log-viewer.tsx`.
+    79→   578→   578→
+    80→   579→   579→### Password change enforcement (triple-layered)
+    81→   580→   580→When a super-admin creates a user with a temporary password (or resets an existing user's password), `passwordChangeRequired` is set to `true`. The user is then forced to change their password on next login via three independent layers:
+    82→   581→   581→1. **Client-side guard** — `PasswordGuard` (`src/components/admin/password-guard.tsx`) redirects to `/admin/change-password` as soon as the session loads. Bypassing this is possible (disable JS), so it's UX + first line of defense only.
+    83→   582→   582→2. **Server-side guard** — both `requireAdmin()` and `requireSuperAdmin()` return 401 when `passwordChangeRequired === true`. So a user with the flag set cannot call any admin API route except the change-password endpoint.
+    84→   583→   583→3. **Verified current password** — `POST /api/admin/change-password` calls `getServerSession` directly (NOT `requireAdmin()`), verifies `currentPassword` against the bcrypt hash, rejects if `newPassword === currentPassword`, hashes the new password, sets `passwordChangeRequired=false`, and audit-logs `user.password-change`. The client then calls `useSession().update()` so the JWT refreshes without a fresh sign-in.
+    85→   584→   584→
+    86→   585→   585→The change-password route is the **only** admin API route that does not go through `requireAdmin()` / `requireSuperAdmin()` — by design, so the flag-bearer can still escape the gate.
+    87→   586→   586→
+    88→   587→   587→### SDS file upload safety
+    89→   588→   588→- **Magic-byte validation** — the file must start with `%PDF-` (PDF signature). Renamed non-PDFs are rejected.
+    90→   589→   589→- **MIME type check** — must be `application/pdf`.
+    91→   590→   590→- **Extension check** — must end in `.pdf`.
+    92→   591→   591→- **Size limit** — enforced (see `validation.ts`).
+    93→   592→   592→- **Filename handling** — user-supplied filename is stored only for display/download. The actual stored file is named `<uuid>.pdf` under `storage/`. No path traversal possible.
+    94→   593→   593→- **No path exposure** — `storageKey` is a UUID, never the original path.
+    95→   594→   594→
+    96→   595→   595→### Input validation
+    97→   596→   596→- All admin chemical inputs validated with **zod** schemas before reaching Prisma.
+    98→   597→   597→- Prisma parameterizes all queries — no raw SQL, no SQL injection surface.
+    99→   598→   598→
+   100→   599→   599→### Security headers (`next.config.ts`)
+   101→   600→   600→- Content-Security-Policy
+   102→   601→   601→- X-Frame-Options: DENY
+   103→   602→   602→- X-Content-Type-Options: nosniff
+   104→   603→   603→- Referrer-Policy
+   105→   604→   604→- Strict-Transport-Security (HSTS)
+   106→   605→   605→- Permissions-Policy
+   107→   606→   606→
+   108→   607→   607→### Secrets
+   109→   608→   608→- `NEXTAUTH_SECRET` — required in production. Generate with:
+   110→   609→   609→  ```bash
+   111→   610→   610→  bun -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'
+   112→   611→   611→  ```
+   113→   612→   612→- `ADMIN_PASSWORD` — plaintext in `.env` only; hashed before DB storage.
+   114→   613→   613→- `.env` is gitignored. `.env.example` is the committed template.
+   115→   614→   614→
+   116→   615→   615→### Known platform-level caveat
+   117→   616→   616→The sandbox gateway (`Caddyfile`) uses an `XTransformPort` query param for port routing. This is an open-proxy-style SSRF surface at the **infra level** and is outside the application code. Flag for the platform team before any public deployment.
+   118→   617→   617→
+   119→   618→   618→---
+   120→   619→   619→
+   121→   620→   620→## 9. PWA Behavior
+   122→   621→   621→
+   123→   622→   622→- **Manifest** (`public/manifest.json`): standalone display, teal theme (`#0d9488`), icons for `any` + `maskable` at 192/512.
+   124→   623→   623→- **Service worker** (`public/sw.js`): vanilla, no Workbox.
+   125→   624→   624→  - Precaches app shell (`/`, manifest, icons).
+   126→   625→   625→  - Navigations: network-first with cache + app-shell fallback.
+   127→   626→   626→  - Static assets: stale-while-revalidate.
+   128→   627→   627→  - SDS PDF responses: cached for offline reuse.
+   129→   628→   628→- **Registration** (`src/components/common/service-worker-register.tsx`): production-only to avoid dev caching churn.
+   130→   629→   629→- **Installability:** after a production build, the app is installable on Android/Chrome/iOS.
+   131→   630→   630→
+   132→   631→   631→---
+   133→   632→   632→
+   134→   633→   633→## 10. Commands
+   135→   634→   634→
+   136→   635→   635→### Development
+   137→   636→   636→```bash
+   138→   637→   637→bun run dev          # Start dev server on port 3000 (Turbopack), logs to dev.log
+   139→   638→   638→bun run lint         # ESLint
+   140→   639→   639→```
+   141→   640→   640→
+   142→   641→   641→### Database
+   143→   642→   642→```bash
+   144→   643→   643→bun run db:push      # Push schema to SQLite (accept-data-loss on schema conflicts)
+   145→   644→   644→bun run db:generate  # Regenerate Prisma Client
+   146→   645→   645→bun run db:migrate   # Create + apply a migration (dev)
+   147→   646→   646→bun run db:reset     # Drop + recreate (dev — destroys data)
+   148→   647→   647→bun run db:seed      # Create admin from .env + migrate 14 chemicals into Prisma DB
+   149→   648→   648→```
+   150→   649→   649→
+   151→   650→   650→### Production
+   152→   651→   651→```bash
+   153→   652→   652→bun run build        # next build + copy static + public into standalone
+   154→   653→   653→bun run start        # Run the standalone server (NODE_ENV=production)
+   155→   654→   654→```
+   156→   655→   655→
+   157→   656→   656→> **Note:** In this sandbox, do **not** run `bun run build`. Use `bun run dev` only. The preview panel serves the dev server.
+   158→   657→   657→
+   159→   658→   658→---
+   160→   659→   659→
+   161→   660→   660→## 11. First-Time Setup (Fresh Clone)
+   162→   661→   661→
+   163→   662→   662→> **See [Section 0 — Quick Start](#0-quick-start--how-to-run-this-project) above** for the complete, step-by-step guide including prerequisites, the `npm` → `bun` migration path, and common error fixes.
+   164→   663→   663→
+   165→   664→   664→The short version:
+   166→   665→   665→
+   167→   666→   666→```bash
+   168→   667→   667→bun install            # NOT npm install
+   169→   668→   668→cp .env.example .env   # then edit .env (set ADMIN_PASSWORD + NEXTAUTH_SECRET)
+   170→   669→   669→bun run db:push        # create SQLite tables
+   171→   670→   670→bun run db:seed        # create admin + 14 chemicals
+   172→   671→   671→bun run dev            # start on http://localhost:3000
+   173→   672→   672→```
+   174→   673→   673→
+   175→   674→   674→---
+   176→   675→   675→
+   177→   676→   676→## 12. Testing Checklist
+   178→   677→   677→
+   179→   678→   678→### Auth
+   180→   679→   679→- [ ] `/admin/login` renders the sign-in form.
+   181→   680→   680→- [ ] Wrong password → "Invalid email or password" error.
+   182→   681→   681→- [ ] Correct credentials → redirect to `/admin`.
+   183→   682→   682→- [ ] Unauthenticated `GET /api/admin/dashboard` → 401.
+   184→   683→   683→- [ ] `/admin/*` (except `/admin/login`) redirects to `/admin/login` when not signed in.
+   185→   684→   684→- [ ] Sign out clears the session and returns to login.
+   186→   685→   685→
+   187→   686→   686→### Chemical CRUD (admin)
+   188→   687→   687→- [ ] Create a new chemical → appears in dashboard and public catalog after sync.
+   189→   688→   688→- [ ] Edit a chemical → change is reflected on devices after sync.
+   190→   689→   689→- [ ] Delete a chemical → disappears from public catalog after sync.
+   191→   690→   690→- [ ] All inputs validated (zod rejects malformed payloads).
+   192→   691→   691→
+   193→   692→   692→### SDS lifecycle (admin)
+   194→   693→   693→- [ ] New chemical gets an auto placeholder SDS (`status = placeholder`).
+   195→   694→   694→- [ ] Upload a real PDF → `status = available`, `version` increments.
+   196→   695→   695→- [ ] Upload a non-PDF (e.g. `.docx` renamed) → rejected.
+   197→   696→   696→- [ ] Upload a file with wrong extension → rejected.
+   198→   697→   697→- [ ] Upload an oversized file → rejected.
+   199→   698→   698→- [ ] View PDF → opens in new tab.
+   200→   699→   699→- [ ] Download PDF → downloads original.
+   201→   700→   700→- [ ] Revert to placeholder → `status = placeholder`, `version` increments, file removed from storage.
+   202→   701→   701→
+   203→   702→   702→### Sync (public PWA)
+   204→   703→   703→- [ ] On first load with empty Dexie → full initial sync pulls all 14 chemicals.
+   205→   704→   704→- [ ] `GET /api/sync?since=0` returns all records.
+   206→   705→   705→- [ ] `GET /api/sync?since=<recent>` returns only deltas.
+   207→   706→   706→- [ ] Make an admin edit → on next periodic sync the public catalog updates.
+   208→   707→   707→- [ ] Toggle device offline → sync status shows `offline`, no sync attempts.
+   209→   708→   708→- [ ] Toggle device back online → sync fires automatically.
+   210→   709→   709→- [ ] SDS PDF only re-downloads when its version changes (inspect `sdsBlobs` in DevTools → Application → IndexedDB).
+   211→   710→   710→- [ ] SDS PDF opens offline (after first online fetch).
+   212→   711→   711→- [ ] Manual retry button works after a simulated error.
+   213→   712→   712→
+   214→   713→   713→### PWA
+   215→   714→   714→- [ ] Manifest valid (Chrome DevTools → Application → Manifest).
+   216→   715→   715→- [ ] Service worker registered in production build.
+   217→   716→   716→- [ ] App shell loads offline after first visit.
+   218→   717→   717→- [ ] Installable on mobile (production build).
+   219→   718→   718→
+   220→   719→   719→### Security
+   221→   720→   720→- [ ] Security headers present in response (check with `curl -I` or browser DevTools).
+   222→   721→   721→- [ ] Cookies are `httpOnly` and (in prod) `Secure` + `__Secure-` prefix.
+   223→   722→   722→- [ ] `.env` is gitignored (`git status` shows it as ignored).
+   224→   723→   723→- [ ] No plaintext passwords in the DB (`SELECT email, passwordHash FROM User` — hash only).
+   225→   724→   724→- [ ] SDS file paths on disk are UUIDs, not user-supplied names.
+   226→   725→   725→
+   227→   726→   726→---
+   228→   727→   727→
+   229→   728→   728→## 13. Extending the System
+   230→   729→   729→
+   231→   730→   730→### Add a new chemical field
+   232→   731→   731→1. Add the field to `prisma/schema.prisma` → `Chemical` model.
+   233→   732→   732→2. `bun run db:push`.
+   234→   733→   733→3. Update the zod schema in `src/lib/validation.ts`.
+   235→   734→   734→4. Update the serialization in `src/lib/serialize.ts`.
+   236→   735→   735→5. Update the Dexie `ChemicalRecord` type in `src/types/index.ts`.
+   237→   736→   736→6. Update the admin chemical form (`src/components/admin/chemical-manager.tsx`).
+   238→   737→   737→7. Update the public detail view (`src/components/detail/chemical-detail.tsx`) if user-facing.
+   239→   738→   738→
+   240→   739→   739→### Add a new admin role (e.g. `EDITOR`)
+   241→   740→   740→The three existing roles (`SUPER_ADMIN` / `ADMIN` / `USER`) are already wired through the entire stack — most features just need to call `requireAdmin()` or `requireSuperAdmin()`. To add a **4th** role:
+   242→   741→   741→1. Update the role union type in `src/types/next-auth.d.ts` (it's currently `"SUPER_ADMIN" | "ADMIN" | "USER"` in all three of `Session.user`, `User`, and `JWT`).
+   243→   742→   742→2. Update the `authorize()` check in `src/lib/auth.ts` (currently `user.role !== "SUPER_ADMIN" && user.role !== "ADMIN"`).
+   244→   743→   743→3. Update the `authorized()` check in `src/middleware.ts` (currently `token?.role === "SUPER_ADMIN" || token?.role === "ADMIN"`).
+   245→   744→   744→4. Add new `require<Role>` helpers in `src/lib/session.ts` as needed (mirroring the shape of `requireAdmin()` / `requireSuperAdmin()`) — including the `passwordChangeRequired` block for defense-in-depth.
+   246→   745→   745→5. Add role-based checks (or zod enum extensions for `role` in `createUserSchema` / `updateUserSchema`) in the relevant API routes. The user-manager UI (`src/components/admin/user-manager.tsx`) also has a hard-coded role Select that may need the new option.
+   247→   746→   746→
+   248→   747→   747→### Change the sync interval
+   249→   748→   748→Edit the periodic interval constant in `src/lib/sync-engine.ts` (and/or `src/hooks/use-sync.ts`).
+   250→   749→   749→
+   251→   750→   750→---
+   252→   751→   751→
+   253→   752→   752→## 14. Troubleshooting (Developer)
+   254→   753→   753→
+   255→   754→   754→| Symptom | Cause | Fix |
+   256→   755→   755→|---|---|---|
+   257→   756→   756→| `PrismaClientInitializationError` | DB file missing or path wrong | Check `DATABASE_URL` in `.env`; run `bun run db:push` |
+   258→   757→   757→| `bun run db:seed` does nothing | Admin already exists with same email | It's idempotent — it upserts. Check `SELECT * FROM User`. |
+   259→   758→   758→| 401 on every admin API even when "logged in" | Session cookie not sent (cross-origin / different port) | Ensure requests use relative paths; in this sandbox use `XTransformPort` for cross-service calls |
+   260→   759→   759→| SDS upload 413 | File too large | Check the size limit in `src/lib/validation.ts` / reverse proxy |
+   261→   760→   760→| Dexie schema version conflict | Old client DB version | Bump Dexie schema version in `src/lib/local-db.ts` with an upgrade function |
+   262→   761→   761→| Service worker not updating | Old SW cached | Bump `CACHE_VERSION` in `public/sw.js`; user will get new SW on next load |
+   263→   762→   762→| Preview shows blank "Z" screen | Dev server not running | `bun run dev` (this is the most common "it's loading" report) |
+   264→   763→   763→
+   265→   764→   764→---
+   266→   765→   765→
+   267→   766→   766→## 15. Project Status
+   268→   767→   767→
+   269→   768→   768→The implementation is **complete and verified**:
+   270→   769→   769→- 14 chemicals seeded into the Prisma backend.
+   271→   770→   770→- Public PWA renders all chemicals, search, filters, detail, emergency mode.
+   272→   771→   771→- Admin login + dashboard functional. The dashboard now has **6 tabs**: Overview / Chemicals / SDS Documents / Users / Audit Log / System. The last three are SUPER_ADMIN-only (conditionally rendered via `session.user.role === "SUPER_ADMIN"`).
+   273→   772→   772→- Delta sync API returns correct deltas; client sync engine runs on startup / online / periodic.
+   274→   773→   773→- SDS PDF upload validates files (magic bytes + MIME + extension + size).
+   275→   774→   774→- SDS PDFs cached client-side in IndexedDB for offline viewing.
+   276→   775→   775→- Security headers configured; `.env` gitignored; admin auth server-side enforced.
+   277→   776→   776→- TypeScript strict: 0 errors. ESLint: 0 errors.
+   278→   777→   777→- **AI auto-fill** works with the default `zai` provider on the Z.ai sandbox (verified end-to-end via Agent Browser). The `gemini` provider code path is API-compatible with the installed `@google/generative-ai` v0.24.1 SDK; live verification against Google's API requires a real `GEMINI_API_KEY` in `.env` (not present in the sandbox).
+   279→   778→   778→- **3-tier role hierarchy** (`SUPER_ADMIN` > `ADMIN` > `USER`) wired through `prisma/schema.prisma`, `src/lib/auth.ts`, `src/lib/session.ts`, `src/middleware.ts`, and `src/types/next-auth.d.ts`. SUPER_ADMIN has full access incl. user management + audit log + system settings; ADMIN manages chemicals + SDS only; USER cannot sign in. Verified end-to-end via Agent Browser.
+   280→   779→   779→- **User management** (CRUD admins) at `/api/admin/users` + `user-manager.tsx` component — SUPER_ADMIN only. Lockout prevention: cannot change own role from SUPER_ADMIN, cannot disable/delete self, cannot remove last active super-admin.
+   281→   780→   780→- **Audit log** (append-only trail) — `AuditLog` Prisma model + `logAction()` helper + `/api/admin/audit` route + `audit-log-viewer.tsx` component. Every chemical/SDS/user/system mutation logged (fire-and-forget). Cursor-paginated viewer with entity-type + action-prefix filters and expandable before/after JSON detail rows.
+   282→   781→   781→- **System Settings tab (Phase D)** at `/api/admin/system/info` + `/api/admin/system/test-ai` + `system-settings.tsx` component — SUPER_ADMIN only. 5 read-only info cards (AI provider, storage, database, sync, runtime) + a "Test Connection" button that calls `testProviderConnection()` and audit-logs `system.test-ai`.
+   283→   782→   782→- **Password change on next login** — triple-layered enforcement (client `PasswordGuard` redirect + server `requireAdmin`/`requireSuperAdmin` 401 block + verified-current-password at `/api/admin/change-password`). JWT refreshed via `useSession().update()` after a successful change so no re-login is needed. Verified end-to-end via Agent Browser.
+   284→   783→   783→
+   285→   784→   784→For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
+   286→   785→   785→
+   287→   786→   786→---
+   288→   787→   787→
+   289→   788→   788→## 16. Anti-Hallucination Reference
+   290→   789→   789→
+   291→   790→   790→> **Purpose:** This section exists so future AI agents (and developers) have a single source of truth about what is actually in the codebase. If the docs and the code ever disagree, **the code is the truth** — update the docs.
+   292→   791→   791→
+   293→   792→   792→### CURRENTLY IMPLEMENTED (verified in code)
+   294→   793→   793→
+   295→   794→   794→| Feature | Where | Notes |
+   296→   795→   795→|---|---|---|
+   297→   796→   796→| Offline-first PWA (Dexie/IndexedDB cache) | `src/lib/local-db.ts`, `src/lib/sync-engine.ts` | Client reads from Dexie; writes are local-only for prefs. |
+   298→   797→   797→| Prisma + SQLite backend (source of truth) | `prisma/schema.prisma`, `src/lib/db.ts` | 4 models: `User`, `Chemical`, `SdsDocument`, `AuditLog`. |
+   299→   798→   798→| NextAuth.js v4 (Credentials, JWT, bcrypt 12 rounds) | `src/lib/auth.ts`, `src/app/api/auth/` | `role === "SUPER_ADMIN" \|\| role === "ADMIN"` gate in `authorize()` (3-tier role hierarchy). Disabled users + `USER` role rejected. JWT carries `id`, `role`, `passwordChangeRequired`. |
+   300→   799→   799→| Admin dashboard at `/admin` (6 tabs) | `src/app/admin/`, `src/components/admin/` | Tabs: Overview / Chemicals / SDS Documents / Users / Audit Log / System. Last 3 are SUPER_ADMIN-only (conditionally rendered). Edge middleware + `requireAdmin()` / `requireSuperAdmin()` server-side guards. |
+   301→   800→   800→| Delta sync API (`GET /api/sync?since=<ms>`) | `src/app/api/sync/route.ts` | Public, returns chemicals + SDS metadata deltas. |
+   302→   801→   801→| SDS PDF upload (magic-byte + MIME + ext + size validation) | `src/app/api/admin/sds/route.ts`, `src/lib/storage.ts`, `src/lib/validation.ts` | UUID storage keys, no path traversal. |
+   303→   802→   802→| SDS PDF download (streamed, version-cached client-side) | `src/app/api/sds/[id]/download/route.ts` | `Cache-Control: no-store` server-side; IndexedDB Blob cache client-side. |
+   304→   803→   803→| **AI auto-fill from PDF** (VLM extraction) | `src/app/api/admin/sds/extract/route.ts`, `src/lib/ai-vlm.ts`, `src/lib/pdf-rasterize.ts` | Provider-agnostic: `zai` / `gemini` / `openai` / `anthropic`. Default `zai` (sandbox). |
+   305→   804→   804→| **Gemini provider** (`@google/generative-ai` v0.24.1) | `src/lib/ai-vlm.ts` → `callGemini()` | Default model `gemini-3.6-flash` (hardcoded line 270). SDK pre-installed. BLOCK_NONE safety, JSON output mode. |
+   306→   805→   805→| PDF rasterization (pure JS, no Poppler) | `src/lib/pdf-rasterize.ts` | `pdfjs-dist` + `@napi-rs/canvas`. Max 5 pages, scale 2.0 (~150 DPI). |
+   307→   806→   806→| Security headers (CSP, HSTS, X-Frame-Options DENY, etc.) | `next.config.ts` | |
+   308→   807→   807→| Service worker (vanilla, production-only) | `public/sw.js`, `src/components/common/service-worker-register.tsx` | App-shell precache + SWR for assets. Disabled in dev. |
+   309→   808→   808→| GHS pictograms (9 inline SVGs) | `src/components/ghs/pictograms.tsx` | |
+   310→   809→   809→| Emergency mode (full-screen, offline, context-aware FAB) | `src/components/emergency/` | |
+   311→   810→   810→| Dark mode (next-themes) | `src/components/common/theme-provider.tsx` | |
+   312→   811→   811→| **3-tier role hierarchy** (`SUPER_ADMIN` > `ADMIN` > `USER`) | `prisma/schema.prisma`, `src/lib/auth.ts`, `src/lib/session.ts`, `src/middleware.ts`, `src/types/next-auth.d.ts` | SUPER_ADMIN has full access (user mgmt + audit log + system settings + chemicals + SDS); ADMIN manages chemicals + SDS only; USER cannot sign in. All three roles defined as a string union in the type augmentation. |
+   313→   812→   812→| User management (CRUD admins) | `src/app/api/admin/users/route.ts`, `src/app/api/admin/users/[id]/route.ts`, `src/components/admin/user-manager.tsx` | SUPER_ADMIN only (via `requireSuperAdmin()`). List / create / update / disable / delete. `passwordHash` never returned. Lockout prevention enforced server-side. |
+   314→   813→   813→| Lockout prevention guards | `src/app/api/admin/users/[id]/route.ts` | Cannot change own role away from `SUPER_ADMIN`; cannot disable / delete self; cannot disable / downgrade / delete the last active super-admin. Each guard returns 400 with a clear error message. |
+   315→   814→   814→| Audit log (append-only trail) | `prisma/schema.prisma` (`AuditLog` model), `src/lib/audit.ts`, `src/app/api/admin/audit/route.ts`, `src/components/admin/audit-log-viewer.tsx` | Every chemical / SDS / user / system mutation logged via `logAction()`. Fire-and-forget (failures logged to stderr, never propagated). Cursor pagination: fetches `limit+1` rows to detect `hasMore`. |
+   316→   815→   815→| System Settings tab (Phase D) | `src/app/api/admin/system/info/route.ts`, `src/app/api/admin/system/test-ai/route.ts`, `src/components/admin/system-settings.tsx` | SUPER_ADMIN only. 5 read-only info cards (AI provider, storage, database, sync, runtime) + "Test Connection" button. Test-ai route audit-logs `system.test-ai`. |
+   317→   816→   816→| AI provider info + test connection | `src/lib/ai-vlm.ts` → `getProviderInfo()` + `testProviderConnection()` | `getProviderInfo()` returns `{ provider, model, apiKeyConfigured, apiKeyHint (masked), sdkInstalled, notes }` — never returns the actual key. `testProviderConnection()` sends a minimal text-only prompt, never sends an image, never touches the DB. |
+   318→   817→   817→| Password change on next login | `prisma/schema.prisma` (`passwordChangeRequired` field on `User`), `src/app/api/admin/change-password/route.ts`, `src/app/admin/change-password/page.tsx`, `src/components/admin/password-guard.tsx` | Triple-layered enforcement: (1) client `PasswordGuard` redirect, (2) `requireAdmin`/`requireSuperAdmin` return 401 when flag is set, (3) `/api/admin/change-password` verifies `currentPassword` against bcrypt before accepting the new one. Change-password route uses `getServerSession` directly (the only admin route that bypasses `requireAdmin`). |
+   319→   818→   818→
+   320→   819→   819→### PLANNED (discussed but NOT implemented)
+   321→   820→   820→
+   322→   821→   821→| Feature | Source | Status |
+   323→   822→   822→|---|---|---|
+   324→   823→   823→| AI-powered chatbot for chemical/SDS queries | `aug12-meeting.md` §1 (Mr. Casila suggestion) | **Not started.** Discussed at the August 12 meeting as a potential future enhancement. No code exists. |
+   325→   824→   824→| Excel bulk chemical import | `ADMIN_GUIDE.md` §4.4 ("A future Excel bulk-import feature is planned") | **Not started.** No code, no API route, no UI. |
+   326→   825→   825→| Per-division admin roles / focal persons | `aug12-meeting.md` §4 | **Partially implemented.** 3-tier role hierarchy now exists (`SUPER_ADMIN`/`ADMIN`/`USER`). Per-division scoping (Phase B) explicitly skipped per user decision — all admins see all chemicals. May revisit if division-scoped access is needed. |
+   327→   826→   826→| Regulatory tag display (DENR-EMB / PNP / PDEA) | `aug12-meeting.md` §3.2 | **Partially present.** The `regulatoryTags` field exists in the Prisma schema and Chemical type, and a `RegulatoryTags` component exists. See "Unknown" below. |
+   328→   827→   827→
+   329→   828→   828→### DEPRECATED / RETIRED (do not use)
+   330→   829→   829→
+   331→   830→   830→| Item | Why | Replace with |
+   332→   831→   831→|---|---|---|
+   333→   832→   832→| `gemini-1.5-flash`, `gemini-1.5-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+   334→   833→   833→| `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-2.0-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+   335→   834→   834→| `gemini-2.5-flash`, `gemini-2.5-pro` | Retired by Google — returns 404 | `gemini-3.6-flash` |
+   336→   835→   835→| `@google/generative-ai` older versions (< 0.24.0) | Missing `responseMimeType` support | v0.24.1 (currently installed) |
+   337→   836→   836→| `pdftoppm` / Poppler system dependency | Replaced by pure-JS renderer | `pdfjs-dist` + `@napi-rs/canvas` (`src/lib/pdf-rasterize.ts`) |
+   338→   837→   837→| Old Dexie-only architecture (no backend) | Described in outdated `README.md` (pre-backend era) | Current: Prisma + SQLite backend + Dexie client cache + delta sync. See §2. |
+   339→   838→   838→| `npm install` / `npm run dev` | Use Bun — `db:seed` is TypeScript | `bun install` + `bun run dev` |
+   340→   839→   839→
+   341→   840→   840→### UNKNOWN / REQUIRES VERIFICATION
+   342→   841→   841→
+   343→   842→   842→| Item | What we know | What we don't |
+   344→   843→   843→|---|---|---|
+   345→   844→   844→| `regulatoryTags` field | Exists in Prisma schema (`Chemical.regulatoryTags`), in the TypeScript types, and a `RegulatoryTags.tsx` component renders them. The seed data includes empty arrays for all 14 chemicals. | Whether the August 12 meeting's request (DENR-EMB / PNP / PDEA classification tags) is fully wired up — the field exists but may need population logic and admin UI. Not verified end-to-end. |
+   346→   845→   845→| Gemini 3.6 free-tier quota | Code comment and `.env.example` say "1,500 requests/day". | This quota is set by Google and may change. Verify at https://ai.google.dev/pricing before relying on it. |
+   347→   846→   846→| Live Gemini API response | SDK wiring is verified (import + `getGenerativeModel` + `generateContent` all callable, `BLOCK_NONE` + `responseMimeType` accepted by the SDK). | No real `GEMINI_API_KEY` is present in the sandbox `.env`, so the actual end-to-end Gemini request/response has not been tested in this environment. The `zai` provider (sandbox default) HAS been tested end-to-end. |
+   348→   847→   847→| `@tanstack/react-query` dependency | Listed in `package.json` (^5.82.0). | **Zero imports found** in `src/`. It is a dead dependency — installed but unused. Safe to remove in a future cleanup, but left in place to avoid breaking the running app. |
+   349→   848→   848→| Committed SQLite DB at `prisma/db/custom.db` | Present in the repo (from the original ZIP). Contains a bcrypt admin hash. | Whether this is intentional (for dev convenience) or an accidental commit. The live sandbox uses a fresh DB at `db/custom.db` (different path). The `.gitignore` does NOT cover `prisma/db/*.db` (only `/db/*.db` root-anchored). |
+   350→   849→   849→
+   351→   850→   850→### Documentation vs. code — how to resolve disagreements
+   352→   851→   851→
+   353→   852→   852→1. **The code is always the truth.** If a doc says X but the code does Y, the doc is wrong.
+   354→   853→   853→2. **Verify in the code** before trusting any doc claim about: model names, env var names, API routes, file locations, database fields.
+   355→   854→   854→3. **Update the doc** to match the code. Do not change the code to match a stale doc unless explicitly asked.
+   356→   855→   855→4. **Never assume a model / API / package exists** without checking the installed version or the code's actual import.
+   357→   856→   856→

@@ -38,7 +38,8 @@ cp .env.example .env
 #    - ADMIN_PASSWORD      (a strong password — will be bcrypt-hashed)
 #    - NEXTAUTH_SECRET     (generate one — see the comment in .env.example)
 #    - DATABASE_URL        (already set to ./db/custom.db — leave as-is)
-#    - NEXTAUTH_URL        (already http://localhost:3000 — leave as-is)
+#    - NEXTAUTH_URL        (LEAVE UNSET — the app uses `trustHost: true` so it
+#                          works behind any gateway/localhost automatically)
 #
 #    Generate a NEXTAUTH_SECRET with:
 #      bun -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'
@@ -221,19 +222,30 @@ src/app/
 ```
 src/lib/
 ├── db.ts                Prisma client (singleton, query-log off in prod)
-├── auth.ts              NextAuth options + hashPassword / verifyPassword (bcrypt)
-├── session.ts           requireAdmin() server-side guard (throws 401 if no session)
+├── auth.ts              NextAuth options + hashPassword / verifyPassword (bcrypt) + **trustHost: true** (works behind preview gateway + localhost)
+├── session.ts           requireAdmin() / requireSuperAdmin() server-side guards — **stale-JWT defense**: DB fresh-state check + 60s in-memory cache + invalidateUserStateCache() on mutations
 ├── storage.ts           Safe SDS file storage (UUID filenames, no path exposure)
-├── validation.ts        zod schemas for chemical & SDS inputs
+├── validation.ts        zod schemas for chemical & SDS inputs (name is `.nullable().optional()` to allow empty-name edits)
 ├── pdf-placeholder.ts   Generates a minimal valid placeholder PDF
-├── pdf-rasterize.ts     PDF → PNG renderer (pdfjs-dist + @napi-rs/canvas, pure JS, no Poppler)
+├── pdf-rasterize.ts     PDF → PNG renderer (pdfjs-dist + @napi-rs/canvas, pure JS, no Poppler; casts for v6 type mismatches)
 ├── ai-vlm.ts            Provider-agnostic VLM abstraction (zai / gemini / openai / anthropic)
 ├── ppe.ts               PPE display helpers / lookup tables
 ├── sync-engine.ts       Client delta sync engine (mutex, rate-limit, SDS blob caching)
 ├── local-db.ts          Dexie schema v2 (chemicals, sdsDocuments, sdsBlobs, syncMeta, ...)
-├── seed-data.ts         14 chemicals + 7 locations + default prefs (migration source)
-├── serialize.ts         JSON ↔ DB field (de)serialization helpers
+├── seed-data.ts         14 chemicals + 7 locations + default prefs (sdsDocumentId="" placeholders — no fake ids)
+├── serialize.ts         JSON ↔ DB field (de)serialization — serializeChemical includes `sdsDocument` relation and uses `c.sdsDocument?.id` for the real SDS cuid
 └── utils.ts             cn() and misc
+```
+
+### Hooks
+```
+src/hooks/
+├── use-online-status.ts     Navigator.onLine reactive subscription
+├── use-database-ready.ts    Waits for Dexie initDatabase() to resolve
+├── use-sync.ts              Drives the sync engine (startup / online / periodic)
+├── use-mobile.ts            Viewport breakpoint hook
+├── use-toast.ts             shadcn toast wrapper
+└── use-pagination.ts        Client-side pagination hook (clamp + reset-on-deps-change via render-phase setState — avoids Next.js 16 set-state-in-effect errors)
 ```
 
 ### Components
@@ -259,15 +271,19 @@ src/middleware.ts         Edge-level /admin/* protection (role=SUPER_ADMIN || AD
 src/types/index.ts        Domain types (ChemicalRecord, GhsPictogram, HazardClass, SyncStatus, ...)
 src/types/next-auth.d.ts  Augments NextAuth session/token with `role` + `passwordChangeRequired`
 src/store/app-store.ts    Zustand: view routing, search/filter, sync status
-src/hooks/                use-sync, use-database-ready, use-online-status, use-mobile, use-toast
+src/hooks/                use-sync, use-database-ready, use-online-status, use-mobile, use-toast, **use-pagination**
 
-public/manifest.json      PWA manifest
+public/manifest.json      PWA manifest (navy theme #0a2540, DOST-MIRDC icons)
 public/sw.js              Vanilla service worker (app-shell cache, SWR for assets)
-public/icons/             icon.svg + 192/512 PNGs (any + maskable)
+public/dost-mirdc-logo.png  Official DOST-MIRDC logo (1929×1928, source for all icons)
+public/icons/             16/32/192/512 PNG (any + maskable) + SVG — all regenerated from DOST-MIRDC logo
 scripts/seed-db.ts        Seeds admin from .env + migrates 14 chemicals into Prisma DB
 scripts/generate-icons.mjssharp-based icon generator
 
-.env                      DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD, NEXTAUTH_SECRET, NEXTAUTH_URL
+.env                      DATABASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD, NEXTAUTH_SECRET
+                          (NEXTAUTH_URL is intentionally UNSET — `trustHost: true` in auth.ts
+                          makes NextAuth work behind the preview gateway AND localhost without
+                          a hardcoded URL)
                           + optional AI_PROVIDER / GEMINI_API_KEY / GEMINI_MODEL
                           (AI_PROVIDER defaults to "zai" — sandbox-only. Set to "gemini"
                           for local dev. See §6A below.)
@@ -556,6 +572,7 @@ A minimum interval between sync attempts prevents hammering the server on flaky 
 
 ### Authentication
 - NextAuth Credentials provider.
+- **`trustHost: true`** is set in `authOptions` (`src/lib/auth.ts`) so NextAuth trusts the request's `Host` header. This makes the app work behind the preview gateway (`preview-chat-<id>.space-z.ai`) AND `localhost:3000` without needing a hardcoded `NEXTAUTH_URL`. (If you ever deploy to a custom domain, `trustHost` continues to work — no env change needed.)
 - **3-tier role hierarchy**: `SUPER_ADMIN` > `ADMIN` > `USER`. Only `SUPER_ADMIN` and `ADMIN` can sign in to `/admin/*`; `USER` is reserved for the public PWA and is rejected by `authorize()`.
 - Disabled accounts (`disabled === true`) cannot sign in.
 - Passwords hashed with **bcrypt (12 rounds)** — never stored or logged in plaintext.
@@ -563,11 +580,25 @@ A minimum interval between sync attempts prevents hammering the server on flaky 
 - On `useSession().update()` (trigger `"update"`), the `jwt` callback re-fetches `passwordChangeRequired` + `role` from the DB so a just-completed password change is reflected without a fresh sign-in.
 - Cookies: `httpOnly`, `sameSite=lax`, `secure` in production (`__Secure-` prefix).
 
+### Stale-JWT defense (Phase E10)
+Without extra safeguards, a downgraded or disabled admin could keep using their JWT for up to 30 days (the JWT `maxAge`). To close this hole, `requireAdmin()` and `requireSuperAdmin()` perform a **DB-backed fresh-state check** on every call:
+
+1. `getFreshUserState(userId)` (in `src/lib/session.ts`) queries the DB for the user's current `disabled`, `role`, and `passwordChangeRequired` fields.
+2. Results are cached in an in-memory `Map<userId, FreshUserState>` with a **60-second TTL** — so the hot path (every admin API call) stays fast and only hits the DB once per minute per user.
+3. If the cached state shows `disabled === true` or `role` no longer qualifies, the guard returns 401 immediately — the JWT is rejected even though it hasn't expired.
+4. Mutations that change a user's state call `invalidateUserStateCache(userId)` to bust the cache immediately:
+   - `PATCH /api/admin/users/[id]` (role change, disable/enable, password reset)
+   - `DELETE /api/admin/users/[id]`
+   - `POST /api/admin/change-password` (clears `passwordChangeRequired`)
+
+This means a SUPER_ADMIN can disable a compromised account and the disabled user's **very next API call** returns 401 (worst case: 60 seconds later when the cache expires).
+
 ### Authorization (defense in depth)
-1. **Edge middleware** (`src/middleware.ts`) — blocks `/admin/*` (except `/admin/login`) unless the JWT has `role === "SUPER_ADMIN" || role === "ADMIN"`. Fast, runs at the edge. (Super-admin-only routes enforce the stricter check server-side via `requireSuperAdmin()`.)
-2. **`requireAdmin()`** (in `src/lib/session.ts`) — every admin API route for chemicals / SDS / dashboard / change-password-adjacent features calls this. Returns 401 if the session is missing or the user is not `ADMIN` / `SUPER_ADMIN`. **Also returns 401 if the user has `passwordChangeRequired === true`** — defense-in-depth so a bypassed client guard still can't reach the API.
-3. **`requireSuperAdmin()`** (in `src/lib/session.ts`) — same shape as `requireAdmin()` but additionally requires `role === "SUPER_ADMIN"`. Used by user-management, audit-log, and system-settings routes. Also blocks `passwordChangeRequired` users.
+1. **Edge middleware** (`src/middleware.ts`) — blocks `/admin` and `/admin/*` (except `/admin/login`) unless the JWT has `role === "SUPER_ADMIN" || role === "ADMIN"`. Fast, runs at the edge. (Super-admin-only routes enforce the stricter check server-side via `requireSuperAdmin()`.) The matcher explicitly includes the bare `/admin` URL so it doesn't slip through to a "Redirecting…" screen.
+2. **`requireAdmin()`** (in `src/lib/session.ts`) — every admin API route for chemicals / SDS / dashboard / change-password-adjacent features calls this. Returns 401 if the session is missing or the user is not `ADMIN` / `SUPER_ADMIN`. **Also returns 401 if the user has `passwordChangeRequired === true`** — defense-in-depth so a bypassed client guard still can't reach the API. **Also performs the stale-JWT fresh-state check** (see above).
+3. **`requireSuperAdmin()`** (in `src/lib/session.ts`) — same shape as `requireAdmin()` but additionally requires `role === "SUPER_ADMIN"`. Used by user-management, audit-log, and system-settings routes. Also blocks `passwordChangeRequired` users and performs the stale-JWT check.
 4. **`PasswordGuard`** client component (`src/components/admin/password-guard.tsx`) — mounted in the admin layout. Uses `useSession()` + `usePathname()`; if the current path is NOT `/admin/login` and NOT `/admin/change-password`, and the session has `passwordChangeRequired === true`, hard-redirects to `/admin/change-password`.
+5. **405-before-401 guard** — admin API routes that only support a subset of HTTP methods (e.g. `/api/admin/sds` supports only `POST`) declare explicit method handlers that call `requireAdmin()` FIRST, then return 405 with an `Allow` header. This ensures an unauthenticated request never sees a "405 Method Not Allowed" before the 401.
 
 ### Audit log
 Every chemical / SDS / user / system mutation is logged via `logAction()` in `src/lib/audit.ts`.
@@ -619,14 +650,15 @@ The sandbox gateway (`Caddyfile`) uses an `XTransformPort` query param for port 
 
 ## 9. PWA Behavior
 
-- **Manifest** (`public/manifest.json`): standalone display, teal theme (`#0d9488`), icons for `any` + `maskable` at 192/512.
+- **Manifest** (`public/manifest.json`): standalone display, **navy theme `#0a2540`** (DOST-MIRDC brand), icons for `any` + `maskable` at 16/32/192/512 + SVG — all regenerated from `public/dost-mirdc-logo.png`. The maskable icons composite the logo on a navy background at the center 80% safe zone so Android adaptive icons don't crop it.
+- **Favicon** (`src/app/layout.tsx` → `metadata.icons`): full size range (16, 32, 192, SVG) so browsers pick the crispest one. `apple-touch-icon` → 192px PNG. All point to `/icons/icon-*.png` (no more stale placeholder).
 - **Service worker** (`public/sw.js`): vanilla, no Workbox.
   - Precaches app shell (`/`, manifest, icons).
   - Navigations: network-first with cache + app-shell fallback.
   - Static assets: stale-while-revalidate.
   - SDS PDF responses: cached for offline reuse.
 - **Registration** (`src/components/common/service-worker-register.tsx`): production-only to avoid dev caching churn.
-- **Installability:** after a production build, the app is installable on Android/Chrome/iOS.
+- **Installability:** after a production build, the app is installable on Android/Chrome/iOS. The installed app icon, splash screen, and taskbar icon all show the DOST-MIRDC logo.
 
 ---
 
@@ -780,6 +812,26 @@ The implementation is **complete and verified**:
 - **Audit log** (append-only trail) — `AuditLog` Prisma model + `logAction()` helper + `/api/admin/audit` route + `audit-log-viewer.tsx` component. Every chemical/SDS/user/system mutation logged (fire-and-forget). Cursor-paginated viewer with entity-type + action-prefix filters and expandable before/after JSON detail rows.
 - **System Settings tab (Phase D)** at `/api/admin/system/info` + `/api/admin/system/test-ai` + `system-settings.tsx` component — SUPER_ADMIN only. 5 read-only info cards (AI provider, storage, database, sync, runtime) + a "Test Connection" button that calls `testProviderConnection()` and audit-logs `system.test-ai`.
 - **Password change on next login** — triple-layered enforcement (client `PasswordGuard` redirect + server `requireAdmin`/`requireSuperAdmin` 401 block + verified-current-password at `/api/admin/change-password`). JWT refreshed via `useSession().update()` after a successful change so no re-login is needed. Verified end-to-end via Agent Browser.
+- **Phase E — security & correctness fixes (10 issues, all verified)**:
+  - **E1 (critical):** User-edit PATCH no longer crashes on empty `name` — zod schema is now `.nullable().optional()` and the client omits the field instead of sending `null`.
+  - **E2:** Audit log filter dropdown replaced the never-written "Sessions" option with "System" (which `system.test-ai` actually writes).
+  - **E3:** Bare `/admin` URL no longer stuck on "Redirecting…" — middleware matcher includes `/admin` explicitly, plus a client-side `useEffect` redirect fallback for unauthenticated sessions.
+  - **E4:** `/api/admin/sds` returns 401 (not 405) when unauthenticated — explicit method handlers call `requireAdmin()` first, then return 405 with `Allow` header.
+  - **E5:** `serializeChemical` now includes the `sdsDocument` relation and uses `c.sdsDocument?.id` for the real SDS cuid (was incorrectly using `c.id`, the chemical id). All 5 callers updated to `include: { sdsDocument: true }`. Seed data corrected to use `sdsDocumentId: ""` instead of fake `"sds-<name>"` ids. Detail view conditionally renders the SDS id row only when a real SDS exists.
+  - **E6:** `/admin/login` now redirects already-authenticated users to `/admin` via `useSession` + `useEffect`.
+  - **E7:** Removed 14 dead imports from `src/app/admin/page.tsx`.
+  - **E8:** Corrected misleading `storage.ts` comment (the SDS download route is intentionally public — the comment wrongly said "authenticated").
+  - **E9:** `pdf-rasterize.ts` casts for 3 pdfjs-dist v6 type mismatches (getDocument params, page.render params, doc.destroy).
+  - **E10 (security):** Stale-JWT defense — see §8 "Stale-JWT defense" above. `getFreshUserState()` + 60s cache + `invalidateUserStateCache()` on every user mutation.
+- **NextAuth `trustHost: true`** — the app now works behind the preview gateway AND localhost without a hardcoded `NEXTAUTH_URL`. This fixed the `Configuration` error users saw when signing in via the preview URL.
+- **DOST-MIRDC navy blue rebrand** — full UI rebrand from the old teal-600 primary to a navy blue palette (`navy-50` → `navy-950`, `--primary: #0a2540`). 52 teal color references replaced across 18 component files. The real DOST-MIRDC logo (`public/dost-mirdc-logo.png`) is integrated in 5 locations: public header, footer, admin dashboard header, login page (centered, 64px, on a navy gradient), and the loading screen. CSS variables `--primary`, `--ring`, `--sidebar-primary`, `--chart-*` all updated. Favicon, Apple touch icon, maskable Android icons, and PWA manifest theme color all regenerated from the logo.
+- **Pagination (Phase F0)** — reusable `usePagination` hook (`src/hooks/use-pagination.ts`) + `DataPagination` component (`src/components/common/data-pagination.tsx`) wired into all 4 list views:
+  - Public catalog: 12 cards/page (resets on search/filter change)
+  - Admin Chemicals table: 10 rows/page
+  - Admin Users table: 10 rows/page
+  - Admin SDS Documents table: 10 rows/page
+  - The hook uses the React-blessed "adjust state during render" pattern (conditional setState during render) instead of `useEffect`+`setState` — avoids Next.js 16 / React 19 `react-hooks/set-state-in-effect` errors. Footer shows "Showing X–Y of Z <noun>" + numbered page nav with ellipses; hides entirely when results fit one page.
+- **Audit log already had cursor-based "Load more"** (not affected by the new pagination — that's a separate, server-side cursor pattern for the append-only log).
 
 For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
 
@@ -815,6 +867,13 @@ For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
 | System Settings tab (Phase D) | `src/app/api/admin/system/info/route.ts`, `src/app/api/admin/system/test-ai/route.ts`, `src/components/admin/system-settings.tsx` | SUPER_ADMIN only. 5 read-only info cards (AI provider, storage, database, sync, runtime) + "Test Connection" button. Test-ai route audit-logs `system.test-ai`. |
 | AI provider info + test connection | `src/lib/ai-vlm.ts` → `getProviderInfo()` + `testProviderConnection()` | `getProviderInfo()` returns `{ provider, model, apiKeyConfigured, apiKeyHint (masked), sdkInstalled, notes }` — never returns the actual key. `testProviderConnection()` sends a minimal text-only prompt, never sends an image, never touches the DB. |
 | Password change on next login | `prisma/schema.prisma` (`passwordChangeRequired` field on `User`), `src/app/api/admin/change-password/route.ts`, `src/app/admin/change-password/page.tsx`, `src/components/admin/password-guard.tsx` | Triple-layered enforcement: (1) client `PasswordGuard` redirect, (2) `requireAdmin`/`requireSuperAdmin` return 401 when flag is set, (3) `/api/admin/change-password` verifies `currentPassword` against bcrypt before accepting the new one. Change-password route uses `getServerSession` directly (the only admin route that bypasses `requireAdmin`). |
+| **Stale-JWT defense (Phase E10)** | `src/lib/session.ts` | `getFreshUserState(userId)` queries DB for `disabled`/`role`/`passwordChangeRequired`, cached 60s in `freshStateCache` Map. `requireAdmin()`/`requireSuperAdmin()` call it on every request and return 401 if the state changed. `invalidateUserStateCache(userId)` is called by user PATCH, user DELETE, and change-password routes. |
+| **NextAuth `trustHost: true`** | `src/lib/auth.ts` | Set in `authOptions`. Lets NextAuth trust the request's `Host` header so it works behind the preview gateway AND localhost without `NEXTAUTH_URL`. `NEXTAUTH_URL` is intentionally UNSET in `.env`. |
+| **DOST-MIRDC navy blue theme** | `src/app/globals.css` (`@theme` block with `navy-50`→`navy-950`, `--primary: #0a2540`), 18 component files | Replaced the old teal-600 primary across 52 color references. `mirdc-cyan` (#00AEEF) and `mirdc-red` (#ED1C24) tokens exist as accents but the brand color is navy. |
+| **DOST-MIRDC logo integration** | `public/dost-mirdc-logo.png`, `src/components/layout/app-header.tsx`, `app-footer.tsx`, `src/app/admin/page.tsx`, `src/app/admin/login/page.tsx`, `src/app/page.tsx` | Real logo (via `next/image`) in 5 locations: public header (36px), footer (20px + full agency name), admin dashboard header (36px), login page (64px centered on navy gradient), loading screen (56px). |
+| **PWA icons regenerated from DOST-MIRDC logo** | `public/icons/icon-16/32/192/512.png`, `icon-maskable-192/512.png`, `icon.svg`, `public/logo.svg`, `public/manifest.json`, `src/app/layout.tsx` (`metadata.icons`) | All icons regenerated from `dost-mirdc-logo.png` via Python PIL. Maskable variants composite the logo on navy `#0a2540` at the 80% safe zone. Manifest `theme_color` corrected from teal `#0d9488` to navy `#0a2540`. Favicon link tags cover 16/32/192/SVG. |
+| **Pagination (Phase F0)** | `src/hooks/use-pagination.ts`, `src/components/common/data-pagination.tsx`, wired into `chemical-catalog.tsx` (12/page), `chemical-manager.tsx` (10/page), `user-manager.tsx` (10/page), `sds-manager.tsx` (10/page) | Reusable hook + component. Hook uses render-phase setState (not useEffect) to clamp/reset page — avoids Next.js 16 `react-hooks/set-state-in-effect` errors. `deps` array serialized to JSON for stable comparison. Footer: "Showing X–Y of Z" + numbered nav with ellipses; hides when totalPages ≤ 1. |
+| **serializeChemical includes sdsDocument (Phase E5)** | `src/lib/serialize.ts`, 5 API callers (`api/chemicals/route.ts`, `api/chemicals/[id]/route.ts`, `api/sync/route.ts`, `api/admin/chemicals/[id]/route.ts`, `api/admin/chemicals/route.ts`), `src/lib/seed-data.ts`, `src/components/detail/chemical-detail.tsx` | `serializeChemical` accepts `Chemical & { sdsDocument?: SdsDocument \| null }` and uses `c.sdsDocument?.id ?? ""` for the real SDS cuid (was incorrectly `c.id`). All callers now `include: { sdsDocument: true }`. Seed data uses `sdsDocumentId: ""` (no fake ids). Detail view conditionally renders the SDS id row. |
 
 ### PLANNED (discussed but NOT implemented)
 
@@ -836,6 +895,10 @@ For end-user administrator documentation, see **`ADMIN_GUIDE.md`**.
 | `pdftoppm` / Poppler system dependency | Replaced by pure-JS renderer | `pdfjs-dist` + `@napi-rs/canvas` (`src/lib/pdf-rasterize.ts`) |
 | Old Dexie-only architecture (no backend) | Described in outdated `README.md` (pre-backend era) | Current: Prisma + SQLite backend + Dexie client cache + delta sync. See §2. |
 | `npm install` / `npm run dev` | Use Bun — `db:seed` is TypeScript | `bun install` + `bun run dev` |
+| **teal-600 / teal-500 / teal-700** color classes | Replaced by DOST-MIRDC navy blue rebrand | `navy-600` / `navy-500` / `navy-700` (see `src/app/globals.css` `@theme` block). Zero `teal-*` references remain in `src/`. |
+| **`NEXTAUTH_URL` env var** | No longer needed — `trustHost: true` in `auth.ts` handles gateway + localhost automatically | Leave UNSET in `.env`. If migrating an old deploy, remove the line. |
+| **Old PWA icon files** (pre-rebrand placeholder shield-with-flask) | Regenerated from DOST-MIRDC logo | `public/icons/icon-*.png` + `icon.svg` + `public/logo.svg` — all rebuilt via Python PIL from `public/dost-mirdc-logo.png`. |
+| **`sdsDocumentId: "sds-<name>"` in seed data** | Were fake placeholder ids that collided with chemical ids | `sdsDocumentId: ""` (empty string) — the real SDS cuid comes from the `sdsDocument` relation via `serializeChemical`. |
 
 ### UNKNOWN / REQUIRES VERIFICATION
 

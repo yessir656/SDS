@@ -1,6 +1,8 @@
 # SDS-CHEM — Safety Data Sheet Centralized System
 
-A centralized, offline-first Progressive Web App for managing Safety Data Sheets (SDS) in a chemical research laboratory. Built for **MIRDC** (Metal Industries Research and Development Center), Philippines.
+A centralized, offline-first Progressive Web App for managing Safety Data Sheets (SDS) in a chemical research laboratory. Built for **DOST-MIRDC** (Department of Science and Technology — Metals Industry Research and Development Center), Philippines.
+
+> **Branded with DOST-MIRDC's official navy blue theme (`#0a2540`) and logo.** The DOST-MIRDC logo appears in the public header, footer, admin dashboard, login screen, loading screen, browser tab favicon, and as the installable PWA / Android / iOS app icon.
 
 ## Problem Solved
 
@@ -62,7 +64,7 @@ bun run start
 ## Design Decisions
 
 ### Visual Direction
-The design uses a **teal-emerald primary** (safety/lab connotation) with **red** reserved exclusively for danger signal words and the emergency system, creating an immediate visual hierarchy where red always means "act now." GHS pictograms are rendered as inline SVG with the official red-diamond/black-symbol standard. Cards use left border-accent color-coding (red for DANGER, amber for WARNING) so hazard level is scannable at a glance. The emergency view inverts to a high-contrast red header with large, plain-language text optimized for readability under stress.
+The design uses a **DOST-MIRDC navy blue primary** (`#0a2540`, with an 11-shade palette from `navy-50` to `navy-950`) as the official agency brand color, with **red** reserved exclusively for danger signal words and the emergency system, creating an immediate visual hierarchy where red always means "act now." GHS pictograms are rendered as inline SVG with the official red-diamond/black-symbol standard. Cards use left border-accent color-coding (red for DANGER, amber for WARNING) so hazard level is scannable at a glance. The emergency view inverts to a high-contrast red header with large, plain-language text optimized for readability under stress. The real DOST-MIRDC logo is integrated throughout (header, footer, login, admin, loading screen) via `next/image`, and all PWA icons / favicons were regenerated from the logo.
 
 ### Architecture: Server-Source-of-Truth + Offline-First Client
 The **server (Prisma + SQLite) is the source of truth** for all chemical and SDS data. The **public PWA reads from Dexie (IndexedDB)** as a local cache, delta-synced from the server on startup / online-transition / periodically. This means:
@@ -173,9 +175,12 @@ scripts/
 - **Admin Dashboard** (`/admin`) — Secure login (NextAuth, bcrypt). Three tabs: Overview (stats), Chemicals (CRUD), SDS (upload/replace/revert PDFs). All admin API routes enforce `requireAdmin()` server-side.
 - **AI Auto-Fill from PDF** — Admins upload a manufacturer's SDS PDF and the AI reads it, extracting 15 fields (chemical name, CAS, formula, GHS pictograms, hazard classes, first-aid, firefighting, spill measures, PPE, etc.). Provider-agnostic: works on the sandbox (free `zai` provider) or locally (free Google Gemini tier, `gemini-3.6-flash`).
 - **SDS PDF Management** — Upload, replace, view, download, and revert to placeholder. Files validated by magic bytes + MIME + extension + size. Stored with UUID filenames (no path traversal). Versioned for client cache invalidation.
-- **PWA** — Installable on Android, iOS (Safari add-to-home-screen), and desktop. Standalone display, teal theme color, maskable icons.
+- **PWA** — Installable on Android, iOS (Safari add-to-home-screen), and desktop. Standalone display, **navy theme color `#0a2540`**, DOST-MIRDC logo as the app icon (regular + maskable variants at 16/32/192/512px + SVG).
 - **Responsive & Accessible** — Mobile-first layout, semantic HTML, ARIA labels, keyboard navigation, focus states, screen-reader text, and `prefers-reduced-motion` support.
 - **Dark Mode** — Light / dark / system theme toggle with no hydration flash.
+- **Pagination** — All list views are paginated: public catalog (12 cards/page), admin Chemicals / Users / SDS tables (10 rows/page). A reusable `usePagination` hook + `DataPagination` component provide a consistent "Showing X–Y of Z" footer with numbered page navigation. Pages reset to 1 automatically when the search term or filters change.
+- **Stale-JWT Defense (Phase E10)** — Disabled or downgraded admins are locked out within 60 seconds (DB-backed fresh-state check on every admin API call, cached 60s, invalidated immediately on user mutations). No more 30-day window where a revoked admin can still access the dashboard.
+- **DOST-MIRDC Branding** — Full UI rebrand to the official DOST-MIRDC navy blue theme. Real agency logo in the header, footer, admin dashboard, login page (64px, centered on a navy gradient), loading screen, browser tab favicon, Apple touch icon, and maskable Android adaptive icon. All PWA icons regenerated from the logo via Python PIL.
 
 ---
 
