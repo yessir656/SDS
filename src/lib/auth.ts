@@ -133,4 +133,9 @@ export const authOptions: NextAuthOptions = {
   },
   // Use NEXTAUTH_SECRET if provided; otherwise NextAuth generates one (dev only).
   secret: process.env.NEXTAUTH_SECRET,
+  // Trust the request's Host header so NextAuth works behind the preview
+  // gateway (preview-chat-<id>.space-z.ai) AND localhost:3000 without needing
+  // a hardcoded NEXTAUTH_URL. Without this, NextAuth v4 rejects the host in
+  // production with error=Configuration.
+  trustHost: true,
 };

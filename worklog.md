@@ -458,3 +458,32 @@ Stage Summary:
 - Bonus: middleware matcher now catches bare /admin URL server-side (was client-side only).
 - Files modified: src/components/admin/user-manager.tsx, src/components/admin/audit-log-viewer.tsx, src/components/admin/password-guard.tsx (no change), src/app/admin/page.tsx, src/app/admin/login/page.tsx, src/app/api/admin/users/[id]/route.ts, src/app/api/admin/sds/route.ts, src/app/api/admin/chemicals/route.ts, src/app/api/admin/chemicals/[id]/route.ts, src/app/api/admin/change-password/route.ts, src/app/api/chemicals/route.ts, src/app/api/chemicals/[id]/route.ts, src/app/api/sync/route.ts, src/components/detail/chemical-detail.tsx, src/lib/serialize.ts, src/lib/seed-data.ts, src/lib/storage.ts, src/lib/pdf-rasterize.ts, src/lib/session.ts, src/middleware.ts (20 files).
 - System is now production-ready from an audit perspective. Remaining work is feature work (Phase F: regulatory tags, MIRDC contacts) + optional enhancements (Phase G: AI chatbot).
+
+---
+Task ID: AUTH-FIX-1
+Agent: Orchestrator
+Task: Fix NextAuth Configuration error when user tried to log in to /admin after sign-in.
+
+Work Log:
+- User reported /api/auth/error?error=Configuration after attempting admin login (screenshot analyzed via VLM).
+- Root cause: `.env` file had lost all variables except `DATABASE_URL`. The original worklog (RUN-1) recorded `NEXTAUTH_SECRET` (32 random hex bytes), `NEXTAUTH_URL=http://localhost:3000`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` — all gone. Without `NEXTAUTH_SECRET`, NextAuth v4 cannot sign JWTs and throws `error=Configuration`.
+- Secondary cause: user accesses the app via the preview gateway URL (`preview-chat-<id>.space-z.ai`), not `localhost:3000`. A hardcoded `NEXTAUTH_URL=http://localhost:3000` would cause host-mismatch errors. Fix: leave `NEXTAUTH_URL` UNSET and add `trustHost: true` to `authOptions` so NextAuth auto-detects the host from the request's `Host` header.
+- Fix applied:
+  1. Regenerated `NEXTAUTH_SECRET` via `openssl rand -hex 32`, wrote complete `.env` with DATABASE_URL + NEXTAUTH_SECRET + ADMIN_EMAIL + ADMIN_PASSWORD (NEXTAUTH_URL intentionally omitted).
+  2. Added `trustHost: true` to `src/lib/auth.ts` `authOptions` (after `secret: process.env.NEXTAUTH_SECRET,`).
+  3. Killed orphaned next-server processes (PIDs 1660, 1672, 1756 — children of the previous daemon that got reparented to PID 1 and kept running with the old/missing env).
+  4. Started fresh dev server via `python3 .zscripts/dev-daemon.py` (new PID 2245).
+- Verification (all passed):
+  - `GET /api/auth/providers` → 200 (was Configuration error)
+  - `GET /api/auth/csrf` → 200
+  - Full credentials sign-in flow: CSRF → POST credentials → session cookie set → `GET /api/auth/session` returns `{ user: { email, role: "SUPER_ADMIN", passwordChangeRequired: false } }`
+  - `GET /admin` with session cookie → 200
+  - `GET /api/admin/dashboard` with session cookie → 200
+  - `GET /api/admin/users` with session cookie → 200
+- Note: regenerating `NEXTAUTH_SECRET` invalidates all pre-existing JWTs (signed with the old secret). This is expected — any admin who was previously logged in will need to sign in again. Not a problem since no one could log in anyway due to the Configuration error.
+
+Stage Summary:
+- NextAuth Configuration error resolved. Admin login flow works end-to-end.
+- `.env` restored with all required vars. `NEXTAUTH_URL` intentionally omitted in favor of `trustHost: true` (supports both localhost and preview gateway URLs).
+- Files modified: `.env` (regenerated), `src/lib/auth.ts` (added `trustHost: true`).
+- Dev server restarted cleanly (orphaned processes killed, new PID 2245).
