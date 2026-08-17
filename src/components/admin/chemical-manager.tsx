@@ -4,7 +4,7 @@
 // ChemicalManager — admin CRUD table for chemicals
 // ============================================================================
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   Plus,
   Search,
@@ -47,6 +47,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { DataPagination } from "@/components/common/data-pagination";
+import { usePagination } from "@/hooks/use-pagination";
 import {
   DEPARTMENTS,
   SIGNAL_WORDS,
@@ -112,15 +114,23 @@ export function ChemicalManager() {
     fetchChemicals();
   }, [fetchChemicals]);
 
-  const filtered = chemicals.filter((c) => {
+  const filtered = useMemo(() => {
     const term = search.toLowerCase().trim();
-    if (!term) return true;
-    return (
-      c.chemicalName.toLowerCase().includes(term) ||
-      c.casNumber.toLowerCase().includes(term) ||
-      c.formula.toLowerCase().includes(term)
+    if (!term) return chemicals;
+    return chemicals.filter(
+      (c) =>
+        c.chemicalName.toLowerCase().includes(term) ||
+        c.casNumber.toLowerCase().includes(term) ||
+        c.formula.toLowerCase().includes(term)
     );
+  }, [chemicals, search]);
+
+  const pagination = usePagination({
+    pageSize: 10,
+    total: filtered.length,
+    deps: [search],
   });
+  const pageItems = pagination.paginate(filtered);
 
   return (
     <div className="space-y-4">
@@ -172,7 +182,7 @@ export function ChemicalManager() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((c) => (
+                  pageItems.map((c) => (
                     <tr key={c.id} className="border-b last:border-0 hover:bg-muted/20">
                       <td className="px-4 py-3">
                         <div className="font-medium">{c.chemicalName}</div>
@@ -219,6 +229,20 @@ export function ChemicalManager() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pagination footer */}
+      {!loading && filtered.length > 0 && (
+        <DataPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          count={pagination.count}
+          startIndex={pagination.startIndex}
+          endIndex={pagination.endIndex}
+          onPageChange={pagination.setPage}
+          noun="chemical"
+        />
+      )}
 
       {/* Create / Edit dialog */}
       {(creating || editing) && (

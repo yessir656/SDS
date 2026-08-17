@@ -534,3 +534,38 @@ Stage Summary:
 - Favicon + metadata + theme-color all updated to reflect DOST-MIRDC branding.
 - Files modified: src/app/globals.css, src/app/layout.tsx, src/app/page.tsx, src/app/admin/page.tsx, src/app/admin/login/page.tsx, src/components/layout/app-header.tsx, src/components/layout/app-footer.tsx, src/components/admin/admin-overview.tsx, src/components/admin/audit-log-viewer.tsx, src/components/admin/chemical-manager.tsx, src/components/admin/sds-manager.tsx, src/components/admin/system-settings.tsx, src/components/admin/user-manager.tsx, src/components/catalog/chemical-card.tsx, src/components/catalog/chemical-catalog.tsx, src/components/catalog/dashboard-stats.tsx, src/components/catalog/filter-panel.tsx, src/components/common/PpeList.tsx, src/components/detail/chemical-detail.tsx, src/components/emergency/emergency-view.tsx, src/app/admin/change-password/page.tsx (21 files).
 - New asset: public/dost-mirdc-logo.png.
+
+---
+Task ID: PAGINATION-1
+Agent: Orchestrator
+Task: Add client-side pagination to all list/table views (catalog + admin tables).
+
+Work Log:
+- Audited all list views: 4 needed pagination (public catalog, admin Chemicals, admin Users, admin SDS). Audit Log already had cursor-based "Load more".
+- Built reusable `usePagination` hook (src/hooks/use-pagination.ts):
+  - Manages page state, derives totalPages/startIndex/endIndex/count.
+  - Clamps page when result set shrinks (e.g. after filtering).
+  - Resets to page 1 when caller-supplied `deps` change (serialized signature so inline arrays compare stably).
+  - Uses the React-blessed "adjust state during render" pattern (conditional setState during render) instead of useEffect+setState — avoids Next.js 16 / React 19 `react-hooks/set-state-in-effect` errors.
+  - Exposes a `paginate<T>(items)` helper that slices any array to the current page.
+- Built reusable `DataPagination` UI component (src/components/common/data-pagination.tsx) on top of the existing shadcn pagination primitives:
+  - Left: "Showing X–Y of Z <noun>" summary.
+  - Right: Previous / numbered pages (with leading & trailing ellipsis when >7 pages) / Next.
+  - Disables prev/next at the boundaries; hides entirely when totalPages <= 1.
+- Wired into all 4 list views:
+  - chemical-catalog.tsx: 12/page grid, deps = [search, departments, signalWords, hazardClasses, isLoading]. Results header now also shows "· page N of M".
+  - chemical-manager.tsx: 10/page table, deps = [search]. Converted `filtered` to useMemo.
+  - user-manager.tsx: 10/page table, deps = [search]. Converted `filtered` to useMemo.
+  - sds-manager.tsx: 10/page table, deps = [search]. Converted `filtered` to useMemo.
+
+Verification (Agent Browser, all passed):
+- Public catalog `/`: 12 cards on page 1, page 2 shows remaining 2 chemicals (Sulfuric Acid, Toluene), "next" disabled on last page. ✓
+- Admin Chemicals tab: 10 rows/page, 2 pages. Typed "acid" while on page 2 → page correctly reset to 1 and nav hid (results fit one page). ✓
+- Admin Users tab: 1 user → pagination correctly hidden (totalPages <= 1). ✓
+- Admin SDS Documents tab: 10 rows/page, 2 pages, "previous" disabled on page 1. ✓
+- `bun run lint`: src/ completely clean (only pre-existing error in upload/ examples, out of scope). ✓
+- Browser errors/console: empty. ✓
+
+Stage Summary:
+- Pagination complete across the entire app. New files: src/hooks/use-pagination.ts, src/components/common/data-pagination.tsx. Modified: 4 list components (chemical-catalog, chemical-manager, user-manager, sds-manager).
+- Pattern: one reusable hook + one reusable component, dropped into any list with a page size and optional deps. Consistent UX (same "Showing X–Y of Z" footer + numbered nav) everywhere.

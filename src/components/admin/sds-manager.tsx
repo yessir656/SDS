@@ -4,7 +4,7 @@
 // SdsManager — admin SDS upload / replace / view / delete
 // ============================================================================
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   Upload,
   Search,
@@ -40,6 +40,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { DataPagination } from "@/components/common/data-pagination";
+import { usePagination } from "@/hooks/use-pagination";
 import { MAX_SDS_FILE_SIZE } from "@/lib/validation";
 
 interface SdsRow {
@@ -95,11 +97,22 @@ export function SdsManager() {
     fetchSds();
   }, [fetchSds]);
 
-  const filtered = rows.filter((r) => {
+  const filtered = useMemo(() => {
     const term = search.toLowerCase().trim();
-    if (!term) return true;
-    return r.chemicalName.toLowerCase().includes(term) || r.casNumber.toLowerCase().includes(term);
+    if (!term) return rows;
+    return rows.filter(
+      (r) =>
+        r.chemicalName.toLowerCase().includes(term) ||
+        r.casNumber.toLowerCase().includes(term)
+    );
+  }, [rows, search]);
+
+  const pagination = usePagination({
+    pageSize: 10,
+    total: filtered.length,
+    deps: [search],
   });
+  const pageItems = pagination.paginate(filtered);
 
   return (
     <div className="space-y-4">
@@ -148,7 +161,7 @@ export function SdsManager() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((r) => (
+                  pageItems.map((r) => (
                     <tr key={r.id} className="border-b last:border-0 hover:bg-muted/20">
                       <td className="px-4 py-3">
                         <div className="font-medium">{r.chemicalName}</div>
@@ -198,6 +211,20 @@ export function SdsManager() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pagination footer */}
+      {!loading && filtered.length > 0 && (
+        <DataPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          count={pagination.count}
+          startIndex={pagination.startIndex}
+          endIndex={pagination.endIndex}
+          onPageChange={pagination.setPage}
+          noun="document"
+        />
+      )}
 
       {/* Upload dialog */}
       {uploadTarget && (

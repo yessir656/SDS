@@ -1,0 +1,807 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→// ============================================================================
+     4→     4→// ChemicalManager — admin CRUD table for chemicals
+     5→     5→// ============================================================================
+     6→     6→
+     7→     7→import { useEffect, useState, useCallback, useRef } from "react";
+     8→     8→import {
+     9→     9→  Plus,
+    10→    10→  Search,
+    11→    11→  Pencil,
+    12→    12→  Trash2,
+    13→    13→  RefreshCw,
+    14→    14→  Loader2,
+    15→    15→  X,
+    16→    16→  FileText,
+    17→    17→  AlertCircle,
+    18→    18→  CheckCircle2,
+    19→    19→} from "lucide-react";
+    20→    20→import { Button } from "@/components/ui/button";
+    21→    21→import { Input } from "@/components/ui/input";
+    22→    22→import { Label } from "@/components/ui/label";
+    23→    23→import { Badge } from "@/components/ui/badge";
+    24→    24→import { Card, CardContent } from "@/components/ui/card";
+    25→    25→import {
+    26→    26→  Dialog,
+    27→    27→  DialogContent,
+    28→    28→  DialogHeader,
+    29→    29→  DialogTitle,
+    30→    30→  DialogDescription,
+    31→    31→} from "@/components/ui/dialog";
+    32→    32→import {
+    33→    33→  Select,
+    34→    34→  SelectContent,
+    35→    35→  SelectItem,
+    36→    36→  SelectTrigger,
+    37→    37→  SelectValue,
+    38→    38→} from "@/components/ui/select";
+    39→    39→import {
+    40→    40→  AlertDialog,
+    41→    41→  AlertDialogAction,
+    42→    42→  AlertDialogCancel,
+    43→    43→  AlertDialogContent,
+    44→    44→  AlertDialogDescription,
+    45→    45→  AlertDialogFooter,
+    46→    46→  AlertDialogHeader,
+    47→    47→  AlertDialogTitle,
+    48→    48→} from "@/components/ui/alert-dialog";
+    49→    49→import { cn } from "@/lib/utils";
+    50→    50→import {
+    51→    51→  DEPARTMENTS,
+    52→    52→  SIGNAL_WORDS,
+    53→    53→  ALL_HAZARD_CLASSES,
+    54→    54→  ALL_GHS_PICTOGRAMS,
+    55→    55→  HAZARD_CLASS_LABELS,
+    56→    56→  GHS_PICTOGRAM_INFO,
+    57→    57→  REGULATORY_CLASSIFICATIONS,
+    58→    58→} from "@/types";
+    59→    59→import type { Department, SignalWord, HazardClass, GhsPictogram } from "@/types";
+    60→    60→
+    61→    61→interface AdminChemical {
+    62→    62→  id: string;
+    63→    63→  casNumber: string;
+    64→    64→  chemicalName: string;
+    65→    65→  formula: string;
+    66→    66→  tradeName: string | null;
+    67→    67→  manufacturer: string;
+    68→    68→  supplier: string;
+    69→    69→  signalWord: string;
+    70→    70→  hazardClasses: string[];
+    71→    71→  ghsPictograms: string[];
+    72→    72→  storageLocation: string;
+    73→    73→  department: string;
+    74→    74→  safetyInstructions: string;
+    75→    75→  version: string;
+    76→    76→  emergencyContact: string;
+    77→    77→  personalProtectiveEquipment: string[];
+    78→    78→  regulatoryTags?: string[];
+    79→    79→  firstAidMeasures: string;
+    80→    80→  firefightingMeasures: string;
+    81→    81→  accidentalReleaseMeasures: string;
+    82→    82→  lastUpdated: number;
+    83→    83→  serverVersion: number;
+    84→    84→  sds: { status: string; version: number } | null;
+    85→    85→  updatedByName: string | null;
+    86→    86→  createdAt: number;
+    87→    87→}
+    88→    88→
+    89→    89→export function ChemicalManager() {
+    90→    90→  const [chemicals, setChemicals] = useState<AdminChemical[]>([]);
+    91→    91→  const [loading, setLoading] = useState(true);
+    92→    92→  const [search, setSearch] = useState("");
+    93→    93→  const [editing, setEditing] = useState<AdminChemical | null>(null);
+    94→    94→  const [creating, setCreating] = useState(false);
+    95→    95→  const [deleteTarget, setDeleteTarget] = useState<AdminChemical | null>(null);
+    96→    96→
+    97→    97→  const fetchChemicals = useCallback(async () => {
+    98→    98→    setLoading(true);
+    99→    99→    try {
+   100→   100→      const res = await fetch("/api/admin/chemicals");
+   101→   101→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   102→   102→      const json = await res.json();
+   103→   103→      setChemicals(json.chemicals);
+   104→   104→    } catch (err) {
+   105→   105→      console.error("Failed to load chemicals:", err);
+   106→   106→    } finally {
+   107→   107→      setLoading(false);
+   108→   108→    }
+   109→   109→  }, []);
+   110→   110→
+   111→   111→  useEffect(() => {
+   112→   112→    fetchChemicals();
+   113→   113→  }, [fetchChemicals]);
+   114→   114→
+   115→   115→  const filtered = chemicals.filter((c) => {
+   116→   116→    const term = search.toLowerCase().trim();
+   117→   117→    if (!term) return true;
+   118→   118→    return (
+   119→   119→      c.chemicalName.toLowerCase().includes(term) ||
+   120→   120→      c.casNumber.toLowerCase().includes(term) ||
+   121→   121→      c.formula.toLowerCase().includes(term)
+   122→   122→    );
+   123→   123→  });
+   124→   124→
+   125→   125→  return (
+   126→   126→    <div className="space-y-4">
+   127→   127→      {/* Toolbar */}
+   128→   128→      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+   129→   129→        <div className="relative flex-1">
+   130→   130→          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   131→   131→          <Input
+   132→   132→            value={search}
+   133→   133→            onChange={(e) => setSearch(e.target.value)}
+   134→   134→            placeholder="Search by name, CAS, or formula…"
+   135→   135→            className="h-10 pl-9"
+   136→   136→          />
+   137→   137→        </div>
+   138→   138→        <Button onClick={() => setCreating(true)} className="gap-2">
+   139→   139→          <Plus className="h-4 w-4" /> Add Chemical
+   140→   140→        </Button>
+   141→   141→        <Button onClick={fetchChemicals} variant="outline" size="icon" className="h-10 w-10">
+   142→   142→          <RefreshCw className="h-4 w-4" />
+   143→   143→        </Button>
+   144→   144→      </div>
+   145→   145→
+   146→   146→      {/* Table */}
+   147→   147→      <Card>
+   148→   148→        <CardContent className="p-0">
+   149→   149→          <div className="overflow-x-auto">
+   150→   150→            <table className="w-full text-sm">
+   151→   151→              <thead className="border-b bg-muted/30">
+   152→   152→                <tr className="text-left text-xs text-muted-foreground">
+   153→   153→                  <th className="px-4 py-3 font-medium">Chemical</th>
+   154→   154→                  <th className="px-4 py-3 font-medium">CAS</th>
+   155→   155→                  <th className="px-4 py-3 font-medium">Signal</th>
+   156→   156→                  <th className="px-4 py-3 font-medium">SDS</th>
+   157→   157→                  <th className="px-4 py-3 font-medium">Last Updated</th>
+   158→   158→                  <th className="px-4 py-3 font-medium text-right">Actions</th>
+   159→   159→                </tr>
+   160→   160→              </thead>
+   161→   161→              <tbody>
+   162→   162→                {loading ? (
+   163→   163→                  <tr>
+   164→   164→                    <td colSpan={6} className="py-12 text-center text-muted-foreground">
+   165→   165→                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-navy-600" />
+   166→   166→                    </td>
+   167→   167→                  </tr>
+   168→   168→                ) : filtered.length === 0 ? (
+   169→   169→                  <tr>
+   170→   170→                    <td colSpan={6} className="py-12 text-center text-muted-foreground">
+   171→   171→                      No chemicals found.
+   172→   172→                    </td>
+   173→   173→                  </tr>
+   174→   174→                ) : (
+   175→   175→                  filtered.map((c) => (
+   176→   176→                    <tr key={c.id} className="border-b last:border-0 hover:bg-muted/20">
+   177→   177→                      <td className="px-4 py-3">
+   178→   178→                        <div className="font-medium">{c.chemicalName}</div>
+   179→   179→                        <div className="text-xs text-muted-foreground">{c.formula}</div>
+   180→   180→                      </td>
+   181→   181→                      <td className="px-4 py-3 font-mono text-xs">{c.casNumber}</td>
+   182→   182→                      <td className="px-4 py-3">
+   183→   183→                        <Badge
+   184→   184→                          className={cn(
+   185→   185→                            "text-[10px] uppercase",
+   186→   186→                            c.signalWord === "danger"
+   187→   187→                              ? "border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+   188→   188→                              : "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300"
+   189→   189→                          )}
+   190→   190→                        >
+   191→   191→                          {c.signalWord}
+   192→   192→                        </Badge>
+   193→   193→                      </td>
+   194→   194→                      <td className="px-4 py-3">
+   195→   195→                        {c.sds?.status === "available" ? (
+   196→   196→                          <Badge className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">Available</Badge>
+   197→   197→                        ) : (
+   198→   198→                          <Badge className="border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">Placeholder</Badge>
+   199→   199→                        )}
+   200→   200→                      </td>
+   201→   201→                      <td className="px-4 py-3 text-xs text-muted-foreground">
+   202→   202→                        {new Date(c.lastUpdated).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })}
+   203→   203→                      </td>
+   204→   204→                      <td className="px-4 py-3">
+   205→   205→                        <div className="flex items-center justify-end gap-1">
+   206→   206→                          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditing(c)}>
+   207→   207→                            <Pencil className="h-4 w-4" />
+   208→   208→                          </Button>
+   209→   209→                          <Button size="icon" variant="ghost" className="h-8 w-8 text-red-600 hover:bg-red-50" onClick={() => setDeleteTarget(c)}>
+   210→   210→                            <Trash2 className="h-4 w-4" />
+   211→   211→                          </Button>
+   212→   212→                        </div>
+   213→   213→                      </td>
+   214→   214→                    </tr>
+   215→   215→                  ))
+   216→   216→                )}
+   217→   217→              </tbody>
+   218→   218→            </table>
+   219→   219→          </div>
+   220→   220→        </CardContent>
+   221→   221→      </Card>
+   222→   222→
+   223→   223→      {/* Create / Edit dialog */}
+   224→   224→      {(creating || editing) && (
+   225→   225→        <ChemicalFormDialog
+   226→   226→          chemical={editing}
+   227→   227→          onClose={() => {
+   228→   228→            setCreating(false);
+   229→   229→            setEditing(null);
+   230→   230→          }}
+   231→   231→          onSaved={() => {
+   232→   232→            setCreating(false);
+   233→   233→            setEditing(null);
+   234→   234→            fetchChemicals();
+   235→   235→          }}
+   236→   236→        />
+   237→   237→      )}
+   238→   238→
+   239→   239→      {/* Delete confirmation */}
+   240→   240→      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+   241→   241→        <AlertDialogContent>
+   242→   242→          <AlertDialogHeader>
+   243→   243→            <AlertDialogTitle>Delete {deleteTarget?.chemicalName}?</AlertDialogTitle>
+   244→   244→            <AlertDialogDescription>
+   245→   245→              This will soft-delete the chemical and its SDS. The change will propagate to all synced devices. This action can be undone by re-adding the chemical.
+   246→   246→            </AlertDialogDescription>
+   247→   247→          </AlertDialogHeader>
+   248→   248→          <AlertDialogFooter>
+   249→   249→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   250→   250→            <AlertDialogAction
+   251→   251→              className="bg-red-600 hover:bg-red-700"
+   252→   252→              onClick={async () => {
+   253→   253→                if (!deleteTarget) return;
+   254→   254→                try {
+   255→   255→                  const res = await fetch(`/api/admin/chemicals/${deleteTarget.id}`, { method: "DELETE" });
+   256→   256→                  if (!res.ok) throw new Error("Delete failed");
+   257→   257→                  setDeleteTarget(null);
+   258→   258→                  fetchChemicals();
+   259→   259→                } catch (err) {
+   260→   260→                  alert("Failed to delete chemical.");
+   261→   261→                }
+   262→   262→              }}
+   263→   263→            >
+   264→   264→              Delete
+   265→   265→            </AlertDialogAction>
+   266→   266→          </AlertDialogFooter>
+   267→   267→        </AlertDialogContent>
+   268→   268→      </AlertDialog>
+   269→   269→    </div>
+   270→   270→  );
+   271→   271→}
+   272→   272→
+   273→   273→// ---------------------------------------------------------------------------
+   274→   274→// Chemical Form Dialog — shared by create and edit
+   275→   275→// ---------------------------------------------------------------------------
+   276→   276→
+   277→   277→interface FormState {
+   278→   278→  id: string;
+   279→   279→  casNumber: string;
+   280→   280→  chemicalName: string;
+   281→   281→  formula: string;
+   282→   282→  tradeName: string;
+   283→   283→  manufacturer: string;
+   284→   284→  supplier: string;
+   285→   285→  signalWord: SignalWord;
+   286→   286→  hazardClasses: HazardClass[];
+   287→   287→  ghsPictograms: GhsPictogram[];
+   288→   288→  storageLocation: string;
+   289→   289→  department: Department;
+   290→   290→  safetyInstructions: string;
+   291→   291→  version: string;
+   292→   292→  emergencyContact: string;
+   293→   293→  personalProtectiveEquipment: string;
+   294→   294→  regulatoryTags: string[];
+   295→   295→  firstAidMeasures: string;
+   296→   296→  firefightingMeasures: string;
+   297→   297→  accidentalReleaseMeasures: string;
+   298→   298→}
+   299→   299→
+   300→   300→function ChemicalFormDialog({
+   301→   301→  chemical,
+   302→   302→  onClose,
+   303→   303→  onSaved,
+   304→   304→}: {
+   305→   305→  chemical: AdminChemical | null;
+   306→   306→  onClose: () => void;
+   307→   307→  onSaved: () => void;
+   308→   308→}) {
+   309→   309→  const [form, setForm] = useState<FormState>({
+   310→   310→    id: chemical?.id ?? "",
+   311→   311→    casNumber: chemical?.casNumber ?? "",
+   312→   312→    chemicalName: chemical?.chemicalName ?? "",
+   313→   313→    formula: chemical?.formula ?? "",
+   314→   314→    tradeName: chemical?.tradeName ?? "",
+   315→   315→    manufacturer: chemical?.manufacturer ?? "",
+   316→   316→    supplier: chemical?.supplier ?? "",
+   317→   317→    signalWord: (chemical?.signalWord as SignalWord) ?? "danger",
+   318→   318→    hazardClasses: (chemical?.hazardClasses as HazardClass[]) ?? [],
+   319→   319→    ghsPictograms: (chemical?.ghsPictograms as GhsPictogram[]) ?? [],
+   320→   320→    storageLocation: chemical?.storageLocation ?? "",
+   321→   321→    department: (chemical?.department as Department) ?? "Chemical Analysis",
+   322→   322→    safetyInstructions: chemical?.safetyInstructions ?? "",
+   323→   323→    version: chemical?.version ?? "1.0",
+   324→   324→    emergencyContact: chemical?.emergencyContact ?? "",
+   325→   325→    personalProtectiveEquipment: chemical?.personalProtectiveEquipment.join("\n") ?? "",
+   326→   326→    regulatoryTags: chemical?.regulatoryTags ?? [],
+   327→   327→    firstAidMeasures: chemical?.firstAidMeasures ?? "",
+   328→   328→    firefightingMeasures: chemical?.firefightingMeasures ?? "",
+   329→   329→    accidentalReleaseMeasures: chemical?.accidentalReleaseMeasures ?? "",
+   330→   330→  });
+   331→   331→  const [saving, setSaving] = useState(false);
+   332→   332→  const [error, setError] = useState<string | null>(null);
+   333→   333→
+   334→   334→  // AI auto-fill state.
+   335→   335→  const [extracting, setExtracting] = useState(false);
+   336→   336→  const [extractError, setExtractError] = useState<string | null>(null);
+   337→   337→  const [extractedFromPdf, setExtractedFromPdf] = useState(false);
+   338→   338→  const fileInputRef = useRef<HTMLInputElement>(null);
+   339→   339→
+   340→   340→  const isEdit = !!chemical;
+   341→   341→
+   342→   342→  // ---------------------------------------------------------------------------
+   343→   343→  // AI auto-fill handler.
+   344→   344→  // Sends the selected PDF to /api/admin/sds/extract, then merges the returned
+   345→   345→  // fields into the form state. The `id` field is preserved (admin must enter
+   346→   346→  // it manually in create mode).
+   347→   347→  // ---------------------------------------------------------------------------
+   348→   348→  const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   349→   349→    const file = e.target.files?.[0];
+   350→   350→    // Reset the input value so the same file can be re-selected later.
+   351→   351→    if (fileInputRef.current) fileInputRef.current.value = "";
+   352→   352→    if (!file) return;
+   353→   353→
+   354→   354→    setExtracting(true);
+   355→   355→    setExtractError(null);
+   356→   356→
+   357→   357→    try {
+   358→   358→      const fd = new FormData();
+   359→   359→      fd.append("file", file);
+   360→   360→
+   361→   361→      const res = await fetch("/api/admin/sds/extract", {
+   362→   362→        method: "POST",
+   363→   363→        body: fd,
+   364→   364→      });
+   365→   365→
+   366→   366→      const json = await res.json().catch(() => ({ success: false, error: "Invalid response from server" }));
+   367→   367→
+   368→   368→      if (!res.ok || !json.success) {
+   369→   369→        throw new Error(json.error || `Extraction failed (HTTP ${res.status})`);
+   370→   370→      }
+   371→   371→
+   372→   372→      const d = json.data as {
+   373→   373→        chemicalName?: string;
+   374→   374→        casNumber?: string;
+   375→   375→        formula?: string;
+   376→   376→        tradeName?: string;
+   377→   377→        manufacturer?: string;
+   378→   378→        supplier?: string;
+   379→   379→        signalWord?: SignalWord;
+   380→   380→        ghsPictograms?: GhsPictogram[];
+   381→   381→        hazardClasses?: HazardClass[];
+   382→   382→        storageLocation?: string;
+   383→   383→        safetyInstructions?: string;
+   384→   384→        emergencyContact?: string;
+   385→   385→        personalProtectiveEquipment?: string[];
+   386→   386→        firstAidMeasures?: string;
+   387→   387→        firefightingMeasures?: string;
+   388→   388→        accidentalReleaseMeasures?: string;
+   389→   389→      };
+   390→   390→
+   391→   391→      setForm((prev) => ({
+   392→   392→        ...prev,
+   393→   393→        // Preserve `id` — admin must always enter it manually in create mode.
+   394→   394→        id: prev.id,
+   395→   395→        chemicalName: d.chemicalName || prev.chemicalName,
+   396→   396→        casNumber: d.casNumber || prev.casNumber,
+   397→   397→        formula: d.formula || prev.formula,
+   398→   398→        tradeName: d.tradeName || prev.tradeName,
+   399→   399→        manufacturer: d.manufacturer || prev.manufacturer,
+   400→   400→        supplier: d.supplier || prev.supplier,
+   401→   401→        signalWord: d.signalWord || prev.signalWord,
+   402→   402→        ghsPictograms:
+   403→   403→          Array.isArray(d.ghsPictograms) && d.ghsPictograms.length > 0
+   404→   404→            ? d.ghsPictograms
+   405→   405→            : prev.ghsPictograms,
+   406→   406→        hazardClasses:
+   407→   407→          Array.isArray(d.hazardClasses) && d.hazardClasses.length > 0
+   408→   408→            ? d.hazardClasses
+   409→   409→            : prev.hazardClasses,
+   410→   410→        storageLocation: d.storageLocation || prev.storageLocation,
+   411→   411→        safetyInstructions: d.safetyInstructions || prev.safetyInstructions,
+   412→   412→        emergencyContact: d.emergencyContact || prev.emergencyContact,
+   413→   413→        // PPE comes back as an array; join with newlines for the textarea.
+   414→   414→        personalProtectiveEquipment:
+   415→   415→          Array.isArray(d.personalProtectiveEquipment) && d.personalProtectiveEquipment.length > 0
+   416→   416→            ? d.personalProtectiveEquipment.join("\n")
+   417→   417→            : prev.personalProtectiveEquipment,
+   418→   418→        firstAidMeasures: d.firstAidMeasures || prev.firstAidMeasures,
+   419→   419→        firefightingMeasures: d.firefightingMeasures || prev.firefightingMeasures,
+   420→   420→        accidentalReleaseMeasures:
+   421→   421→          d.accidentalReleaseMeasures || prev.accidentalReleaseMeasures,
+   422→   422→      }));
+   423→   423→
+   424→   424→      setExtractedFromPdf(true);
+   425→   425→    } catch (err) {
+   426→   426→      setExtractError(err instanceof Error ? err.message : "Auto-fill failed");
+   427→   427→      setExtractedFromPdf(false);
+   428→   428→    } finally {
+   429→   429→      setExtracting(false);
+   430→   430→    }
+   431→   431→  };
+   432→   432→
+   433→   433→  const handleSubmit = async (e: React.FormEvent) => {
+   434→   434→    e.preventDefault();
+   435→   435→    setSaving(true);
+   436→   436→    setError(null);
+   437→   437→
+   438→   438→    try {
+   439→   439→      const payload = {
+   440→   440→        ...form,
+   441→   441→        personalProtectiveEquipment: form.personalProtectiveEquipment
+   442→   442→          .split("\n")
+   443→   443→          .map((s) => s.trim())
+   444→   444→          .filter(Boolean),
+   445→   445→      };
+   446→   446→
+   447→   447→      const url = isEdit ? `/api/admin/chemicals/${form.id}` : "/api/admin/chemicals";
+   448→   448→      const method = isEdit ? "PUT" : "POST";
+   449→   449→
+   450→   450→      const res = await fetch(url, {
+   451→   451→        method,
+   452→   452→        headers: { "Content-Type": "application/json" },
+   453→   453→        body: JSON.stringify(payload),
+   454→   454→      });
+   455→   455→
+   456→   456→      if (!res.ok) {
+   457→   457→        const err = await res.json().catch(() => ({ error: "Request failed" }));
+   458→   458→        throw new Error(err.error || `HTTP ${res.status}`);
+   459→   459→      }
+   460→   460→
+   461→   461→      onSaved();
+   462→   462→    } catch (err) {
+   463→   463→      setError(err instanceof Error ? err.message : "Save failed");
+   464→   464→    } finally {
+   465→   465→      setSaving(false);
+   466→   466→    }
+   467→   467→  };
+   468→   468→
+   469→   469→  const toggleArray = <T,>(arr: T[], value: T): T[] => {
+   470→   470→    return arr.includes(value) ? arr.filter((x) => x !== value) : [...arr, value];
+   471→   471→  };
+   472→   472→
+   473→   473→  return (
+   474→   474→    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+   475→   475→      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+   476→   476→        <DialogHeader>
+   477→   477→          <DialogTitle>{isEdit ? "Edit Chemical" : "Add New Chemical"}</DialogTitle>
+   478→   478→          <DialogDescription>
+   479→   479→            {isEdit
+   480→   480→              ? "Update the chemical record. Changes will sync to all devices."
+   481→   481→              : "Create a new chemical. A placeholder SDS will be generated automatically."}
+   482→   482→          </DialogDescription>
+   483→   483→        </DialogHeader>
+   484→   484→
+   485→   485→        {/* Hidden file input — triggered by the Auto-fill button. */}
+   486→   486→        <input
+   487→   487→          ref={fileInputRef}
+   488→   488→          type="file"
+   489→   489→          accept=".pdf,application/pdf"
+   490→   490→          hidden
+   491→   491→          onChange={handleAutoFill}
+   492→   492→        />
+   493→   493→
+   494→   494→        <form onSubmit={handleSubmit} className="space-y-4">
+   495→   495→          {/* Auto-fill from PDF banner / button */}
+   496→   496→          <div className="space-y-2 rounded-lg border border-navy-200 bg-navy-50/60 p-3 dark:border-navy-900 dark:bg-navy-950/40">
+   497→   497→            <div className="flex flex-wrap items-center gap-2">
+   498→   498→              <Button
+   499→   499→                type="button"
+   500→   500→                variant="outline"
+   501→   501→                size="sm"
+   502→   502→                className="gap-2 border-navy-400 text-navy-700 hover:bg-navy-100 dark:border-navy-800 dark:text-navy-300 dark:hover:bg-navy-900/40"
+   503→   503→                onClick={() => fileInputRef.current?.click()}
+   504→   504→                disabled={extracting || saving}
+   505→   505→              >
+   506→   506→                {extracting ? (
+   507→   507→                  <Loader2 className="h-4 w-4 animate-spin" />
+   508→   508→                ) : (
+   509→   509→                  <FileText className="h-4 w-4" />
+   510→   510→                )}
+   511→   511→                {extracting ? "Reading SDS document…" : "Auto-fill from PDF"}
+   512→   512→              </Button>
+   513→   513→              <span className="text-xs text-muted-foreground">
+   514→   514→                Upload a scanned or digital SDS PDF — AI will read it and pre-fill the fields below.
+   515→   515→              </span>
+   516→   516→            </div>
+   517→   517→
+   518→   518→            {/* Loading state */}
+   519→   519→            {extracting && (
+   520→   520→              <div className="flex items-center gap-2 text-xs text-navy-700 dark:text-navy-300">
+   521→   521→                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   522→   522→                Converting PDF to images, then reading with AI… This takes ~10-15 seconds for multi-page documents.
+   523→   523→              </div>
+   524→   524→            )}
+   525→   525→
+   526→   526→            {/* Error banner */}
+   527→   527→            {extractError && !extracting && (
+   528→   528→              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+   529→   529→                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+   530→   530→                <div className="flex-1">
+   531→   531→                  <div className="font-semibold">Auto-fill failed</div>
+   532→   532→                  <div className="mt-0.5">{extractError}</div>
+   533→   533→                </div>
+   534→   534→                <button
+   535→   535→                  type="button"
+   536→   536→                  className="shrink-0 rounded p-0.5 hover:bg-amber-100 dark:hover:bg-amber-900"
+   537→   537→                  onClick={() => setExtractError(null)}
+   538→   538→                  aria-label="Dismiss error"
+   539→   539→                >
+   540→   540→                  <X className="h-3.5 w-3.5" />
+   541→   541→                </button>
+   542→   542→              </div>
+   543→   543→            )}
+   544→   544→
+   545→   545→            {/* Review banner */}
+   546→   546→            {extractedFromPdf && !extracting && (
+   547→   547→              <div className="flex items-start gap-2 rounded-md border border-navy-300 bg-navy-100/70 px-3 py-2 text-xs text-navy-800 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-200">
+   548→   548→                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+   549→   549→                <div className="flex-1">
+   550→   550→                  <div className="font-semibold">Auto-filled from PDF</div>
+   551→   551→                  <div className="mt-0.5">Please review all fields carefully before saving — AI extraction may have errors or omissions.</div>
+   552→   552→                </div>
+   553→   553→                <button
+   554→   554→                  type="button"
+   555→   555→                  className="shrink-0 rounded p-0.5 hover:bg-navy-200 dark:hover:bg-navy-800"
+   556→   556→                  onClick={() => setExtractedFromPdf(false)}
+   557→   557→                  aria-label="Dismiss review banner"
+   558→   558→                >
+   559→   559→                  <X className="h-3.5 w-3.5" />
+   560→   560→                </button>
+   561→   561→              </div>
+   562→   562→            )}
+   563→   563→          </div>
+   564→   564→
+   565→   565→          {/* ID — only for create */}
+   566→   566→          {!isEdit && (
+   567→   567→            <div className="space-y-2">
+   568→   568→              <Label htmlFor="id">ID (lowercase, dashes only)</Label>
+   569→   569→              <Input
+   570→   570→                id="id"
+   571→   571→                value={form.id}
+   572→   572→                onChange={(e) => setForm({ ...form, id: e.target.value })}
+   573→   573→                required
+   574→   574→                placeholder="e.g. chem-acetone"
+   575→   575→                pattern="[a-z0-9-]+"
+   576→   576→              />
+   577→   577→            </div>
+   578→   578→          )}
+   579→   579→
+   580→   580→          <div className="grid grid-cols-2 gap-3">
+   581→   581→            <div className="space-y-2">
+   582→   582→              <Label htmlFor="chemicalName">Chemical Name</Label>
+   583→   583→              <Input id="chemicalName" value={form.chemicalName} onChange={(e) => setForm({ ...form, chemicalName: e.target.value })} required />
+   584→   584→            </div>
+   585→   585→            <div className="space-y-2">
+   586→   586→              <Label htmlFor="casNumber">CAS Number</Label>
+   587→   587→              <Input id="casNumber" value={form.casNumber} onChange={(e) => setForm({ ...form, casNumber: e.target.value })} required />
+   588→   588→            </div>
+   589→   589→          </div>
+   590→   590→
+   591→   591→          <div className="grid grid-cols-2 gap-3">
+   592→   592→            <div className="space-y-2">
+   593→   593→              <Label htmlFor="formula">Formula</Label>
+   594→   594→              <Input id="formula" value={form.formula} onChange={(e) => setForm({ ...form, formula: e.target.value })} required />
+   595→   595→            </div>
+   596→   596→            <div className="space-y-2">
+   597→   597→              <Label htmlFor="tradeName">Trade Name</Label>
+   598→   598→              <Input id="tradeName" value={form.tradeName} onChange={(e) => setForm({ ...form, tradeName: e.target.value })} />
+   599→   599→            </div>
+   600→   600→          </div>
+   601→   601→
+   602→   602→          <div className="grid grid-cols-2 gap-3">
+   603→   603→            <div className="space-y-2">
+   604→   604→              <Label htmlFor="manufacturer">Manufacturer</Label>
+   605→   605→              <Input id="manufacturer" value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} />
+   606→   606→            </div>
+   607→   607→            <div className="space-y-2">
+   608→   608→              <Label htmlFor="supplier">Supplier</Label>
+   609→   609→              <Input id="supplier" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
+   610→   610→            </div>
+   611→   611→          </div>
+   612→   612→
+   613→   613→          <div className="grid grid-cols-2 gap-3">
+   614→   614→            <div className="space-y-2">
+   615→   615→              <Label>Signal Word</Label>
+   616→   616→              <Select value={form.signalWord} onValueChange={(v) => setForm({ ...form, signalWord: v as SignalWord })}>
+   617→   617→                <SelectTrigger><SelectValue /></SelectTrigger>
+   618→   618→                <SelectContent>
+   619→   619→                  {SIGNAL_WORDS.map((sw) => (
+   620→   620→                    <SelectItem key={sw} value={sw}>{sw.toUpperCase()}</SelectItem>
+   621→   621→                  ))}
+   622→   622→                </SelectContent>
+   623→   623→              </Select>
+   624→   624→            </div>
+   625→   625→            <div className="space-y-2">
+   626→   626→              <Label>Department</Label>
+   627→   627→              <Select value={form.department} onValueChange={(v) => setForm({ ...form, department: v as Department })}>
+   628→   628→                <SelectTrigger><SelectValue /></SelectTrigger>
+   629→   629→                <SelectContent>
+   630→   630→                  {DEPARTMENTS.map((d) => (
+   631→   631→                    <SelectItem key={d} value={d}>{d}</SelectItem>
+   632→   632→                  ))}
+   633→   633→                </SelectContent>
+   634→   634→              </Select>
+   635→   635→            </div>
+   636→   636→          </div>
+   637→   637→
+   638→   638→          <div className="grid grid-cols-2 gap-3">
+   639→   639→            <div className="space-y-2">
+   640→   640→              <Label htmlFor="storageLocation">Storage Location</Label>
+   641→   641→              <Input id="storageLocation" value={form.storageLocation} onChange={(e) => setForm({ ...form, storageLocation: e.target.value })} />
+   642→   642→            </div>
+   643→   643→            <div className="space-y-2">
+   644→   644→              <Label htmlFor="version">Version</Label>
+   645→   645→              <Input id="version" value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} />
+   646→   646→            </div>
+   647→   647→          </div>
+   648→   648→
+   649→   649→          {/* GHS Pictograms */}
+   650→   650→          <div className="space-y-2">
+   651→   651→            <Label>GHS Pictograms</Label>
+   652→   652→            <div className="flex flex-wrap gap-1.5">
+   653→   653→              {ALL_GHS_PICTOGRAMS.map((p) => (
+   654→   654→                <button
+   655→   655→                  key={p}
+   656→   656→                  type="button"
+   657→   657→                  onClick={() => setForm({ ...form, ghsPictograms: toggleArray(form.ghsPictograms, p) })}
+   658→   658→                  className={cn(
+   659→   659→                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+   660→   660→                    form.ghsPictograms.includes(p)
+   661→   661→                      ? "bg-navy-600 text-white border-navy-600"
+   662→   662→                      : "bg-background hover:border-navy-400"
+   663→   663→                  )}
+   664→   664→                >
+   665→   665→                  {GHS_PICTOGRAM_INFO[p].label}
+   666→   666→                </button>
+   667→   667→              ))}
+   668→   668→            </div>
+   669→   669→          </div>
+   670→   670→
+   671→   671→          {/* Hazard Classes */}
+   672→   672→          <div className="space-y-2">
+   673→   673→            <Label>Hazard Classes</Label>
+   674→   674→            <div className="flex flex-wrap gap-1.5">
+   675→   675→              {ALL_HAZARD_CLASSES.map((hc) => (
+   676→   676→                <button
+   677→   677→                  key={hc}
+   678→   678→                  type="button"
+   679→   679→                  onClick={() => setForm({ ...form, hazardClasses: toggleArray(form.hazardClasses, hc) })}
+   680→   680→                  className={cn(
+   681→   681→                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+   682→   682→                    form.hazardClasses.includes(hc)
+   683→   683→                      ? "bg-navy-600 text-white border-navy-600"
+   684→   684→                      : "bg-background hover:border-navy-400"
+   685→   685→                  )}
+   686→   686→                >
+   687→   687→                  {HAZARD_CLASS_LABELS[hc]}
+   688→   688→                </button>
+   689→   689→              ))}
+   690→   690→            </div>
+   691→   691→          </div>
+   692→   692→
+   693→   693→          <div className="space-y-2">
+   694→   694→            <Label htmlFor="emergencyContact">Emergency Contact</Label>
+   695→   695→            <Input id="emergencyContact" value={form.emergencyContact} onChange={(e) => setForm({ ...form, emergencyContact: e.target.value })} />
+   696→   696→          </div>
+   697→   697→
+   698→   698→          <div className="space-y-2">
+   699→   699→            <Label htmlFor="regulatoryTags">Regulatory classifications (optional)</Label>
+   700→   700→            <div
+   701→   701→              id="regulatoryTags"
+   702→   702→              className="flex flex-wrap items-center gap-2"
+   703→   703→            >
+   704→   704→              {REGULATORY_CLASSIFICATIONS.map((tag) => {
+   705→   705→                const active = form.regulatoryTags.includes(tag);
+   706→   706→                return (
+   707→   707→                  <button
+   708→   708→                    key={tag}
+   709→   709→                    type="button"
+   710→   710→                    onClick={() =>
+   711→   711→                      setForm({
+   712→   712→                        ...form,
+   713→   713→                        regulatoryTags: toggleArray(form.regulatoryTags, tag),
+   714→   714→                      })
+   715→   715→                    }
+   716→   716→                    className={cn(
+   717→   717→                      "rounded-md border px-2.5 py-1 text-xs font-medium transition",
+   718→   718→                      active
+   719→   719→                        ? "border-sky-600 bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-200"
+   720→   720→                        : "border-border bg-background text-muted-foreground hover:bg-muted"
+   721→   721→                    )}
+   722→   722→                  >
+   723→   723→                    {active && (
+   724→   724→                      <CheckCircle2 className="mr-1 inline h-3 w-3" />
+   725→   725→                    )}
+   726→   726→                    {tag}
+   727→   727→                  </button>
+   728→   728→                );
+   729→   729→              })}
+   730→   730→            </div>
+   731→   731→            <p className="text-[11px] text-muted-foreground">
+   732→   732→              Choose from the MIRDC-controlled list (DENR-EMB, PNP, PDEA, FDA,
+   733→   733→              DOT, DOH).
+   734→   734→            </p>
+   735→   735→          </div>
+   736→   736→
+   737→   737→          <div className="space-y-2">
+   738→   738→            <Label htmlFor="ppe">PPE (one per line)</Label>
+   739→   739→            <p className="text-[11px] text-muted-foreground">
+   740→   740→              Add a note in parentheses, e.g. "Nitrile gloves (powder-free, size L)".
+   741→   741→            </p>
+   742→   742→            <textarea
+   743→   743→              id="ppe"
+   744→   744→              value={form.personalProtectiveEquipment}
+   745→   745→              onChange={(e) => setForm({ ...form, personalProtectiveEquipment: e.target.value })}
+   746→   746→              className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+   747→   747→              placeholder="Chemical splash goggles&#10;Nitrile gloves (powder-free)&#10;Flame-resistant lab coat"
+   748→   748→            />
+   749→   749→          </div>
+   750→   750→
+   751→   751→          <div className="space-y-2">
+   752→   752→            <Label htmlFor="safetyInstructions">Safety Instructions</Label>
+   753→   753→            <textarea
+   754→   754→              id="safetyInstructions"
+   755→   755→              value={form.safetyInstructions}
+   756→   756→              onChange={(e) => setForm({ ...form, safetyInstructions: e.target.value })}
+   757→   757→              className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+   758→   758→            />
+   759→   759→          </div>
+   760→   760→
+   761→   761→          <div className="space-y-2">
+   762→   762→            <Label htmlFor="firstAidMeasures">First-Aid Measures (SDS Section 4)</Label>
+   763→   763→            <textarea
+   764→   764→              id="firstAidMeasures"
+   765→   765→              value={form.firstAidMeasures}
+   766→   766→              onChange={(e) => setForm({ ...form, firstAidMeasures: e.target.value })}
+   767→   767→              className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+   768→   768→            />
+   769→   769→          </div>
+   770→   770→
+   771→   771→          <div className="space-y-2">
+   772→   772→            <Label htmlFor="firefightingMeasures">Firefighting Measures (SDS Section 5)</Label>
+   773→   773→            <textarea
+   774→   774→              id="firefightingMeasures"
+   775→   775→              value={form.firefightingMeasures}
+   776→   776→              onChange={(e) => setForm({ ...form, firefightingMeasures: e.target.value })}
+   777→   777→              className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+   778→   778→            />
+   779→   779→          </div>
+   780→   780→
+   781→   781→          <div className="space-y-2">
+   782→   782→            <Label htmlFor="accidentalReleaseMeasures">Accidental Release Measures (SDS Section 6)</Label>
+   783→   783→            <textarea
+   784→   784→              id="accidentalReleaseMeasures"
+   785→   785→              value={form.accidentalReleaseMeasures}
+   786→   786→              onChange={(e) => setForm({ ...form, accidentalReleaseMeasures: e.target.value })}
+   787→   787→              className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+   788→   788→            />
+   789→   789→          </div>
+   790→   790→
+   791→   791→          {error && (
+   792→   792→            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{error}</p>
+   793→   793→          )}
+   794→   794→
+   795→   795→          <div className="flex justify-end gap-2 pt-2">
+   796→   796→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   797→   797→            <Button type="submit" disabled={saving} className="gap-2">
+   798→   798→              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+   799→   799→              {isEdit ? "Save Changes" : "Create Chemical"}
+   800→   800→            </Button>
+   801→   801→          </div>
+   802→   802→        </form>
+   803→   803→      </DialogContent>
+   804→   804→    </Dialog>
+   805→   805→  );
+   806→   806→}
+   807→   807→

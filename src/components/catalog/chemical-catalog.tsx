@@ -4,7 +4,7 @@
 // ChemicalCatalog — main catalog view with stats, search, filters, grid
 // ============================================================================
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   SlidersHorizontal,
@@ -18,8 +18,12 @@ import { DashboardStats } from "./dashboard-stats";
 import { SearchBar } from "./search-bar";
 import { FilterPanel, FilterControls } from "./filter-panel";
 import { ChemicalCard } from "./chemical-card";
+import { DataPagination } from "@/components/common/data-pagination";
+import { usePagination } from "@/hooks/use-pagination";
 import { searchChemicals } from "@/lib/local-db";
 import { useAppStore } from "@/store/app-store";
+
+const PAGE_SIZE = 12;
 
 export function ChemicalCatalog() {
   const query = useAppStore((s) => s.query);
@@ -38,7 +42,17 @@ export function ChemicalCatalog() {
   );
 
   const isLoading = chemicals === undefined;
-  const isEmpty = !isLoading && chemicals.length === 0;
+  const safeChemicals = useMemo(() => chemicals ?? [], [chemicals]);
+  const isEmpty = !isLoading && safeChemicals.length === 0;
+
+  const pagination = usePagination({
+    pageSize: PAGE_SIZE,
+    total: safeChemicals.length,
+    // Reset to page 1 whenever the search term, filters, or loading state
+    // produce a new result set.
+    deps: [query.search, query.departments, query.signalWords, query.hazardClasses, isLoading],
+  });
+  const pageItems = pagination.paginate(safeChemicals);
 
   return (
     <div className="space-y-5">
@@ -86,9 +100,18 @@ export function ChemicalCatalog() {
           <p className="text-sm text-muted-foreground">
             Showing{" "}
             <span className="font-semibold text-foreground">
-              {chemicals.length}
+              {safeChemicals.length}
             </span>{" "}
-            {chemicals.length === 1 ? "chemical" : "chemicals"}
+            {safeChemicals.length === 1 ? "chemical" : "chemicals"}
+            {pagination.totalPages > 1 && (
+              <>
+                {" "}· page{" "}
+                <span className="font-semibold text-foreground">
+                  {pagination.page}
+                </span>{" "}
+                of {pagination.totalPages}
+              </>
+            )}
           </p>
         </div>
       )}
@@ -99,10 +122,22 @@ export function ChemicalCatalog() {
       ) : isEmpty ? (
         <EmptyState />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {chemicals.map((chemical) => (
-            <ChemicalCard key={chemical.id} chemical={chemical} />
-          ))}
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {pageItems.map((chemical) => (
+              <ChemicalCard key={chemical.id} chemical={chemical} />
+            ))}
+          </div>
+          <DataPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            total={pagination.total}
+            count={pagination.count}
+            startIndex={pagination.startIndex}
+            endIndex={pagination.endIndex}
+            onPageChange={pagination.setPage}
+            noun="chemical"
+          />
         </div>
       )}
     </div>

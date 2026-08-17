@@ -11,7 +11,7 @@
 //   • Lockout prevention: cannot disable/delete self or downgrade own role
 // ============================================================================
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import {
   UserPlus,
@@ -59,6 +59,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DataPagination } from "@/components/common/data-pagination";
+import { usePagination } from "@/hooks/use-pagination";
 
 // ---------------------------------------------------------------------------
 // Types — mirror the API responses.
@@ -129,15 +131,24 @@ export function UserManager() {
     void load();
   }, [load]);
 
-  const filtered = (users ?? []).filter((u) => {
-    if (!search.trim()) return true;
+  const filtered = useMemo(() => {
+    const list = users ?? [];
+    if (!search.trim()) return list;
     const q = search.toLowerCase();
-    return (
-      u.email.toLowerCase().includes(q) ||
-      (u.name?.toLowerCase().includes(q) ?? false) ||
-      u.role.toLowerCase().includes(q)
+    return list.filter(
+      (u) =>
+        u.email.toLowerCase().includes(q) ||
+        (u.name?.toLowerCase().includes(q) ?? false) ||
+        u.role.toLowerCase().includes(q)
     );
+  }, [users, search]);
+
+  const pagination = usePagination({
+    pageSize: 10,
+    total: filtered.length,
+    deps: [search],
   });
+  const pageItems = pagination.paginate(filtered);
 
   const superAdminCount = (users ?? []).filter(
     (u) => u.role === "SUPER_ADMIN" && !u.disabled
@@ -227,7 +238,7 @@ export function UserManager() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((u) => {
+                  {pageItems.map((u) => {
                     const isSelf = u.id === currentUserId;
                     return (
                       <tr
@@ -327,6 +338,20 @@ export function UserManager() {
           )}
         </CardContent>
       </Card>
+
+      {/* Pagination footer */}
+      {!loading && users && filtered.length > 0 && (
+        <DataPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          count={pagination.count}
+          startIndex={pagination.startIndex}
+          endIndex={pagination.endIndex}
+          onPageChange={pagination.setPage}
+          noun="user"
+        />
+      )}
 
       {/* Create dialog */}
       <CreateUserDialog
