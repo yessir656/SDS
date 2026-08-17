@@ -1,14 +1,14 @@
 {
-  "name": "SDS-CHEM — Safety Data Sheet System",
+  "name": "SDS-CHEM — DOST-MIRDC Safety Data Sheet System",
   "short_name": "SDS-CHEM",
-  "description": "Centralized Safety Data Sheet management for chemical safety. Works offline.",
+  "description": "Centralized Safety Data Sheet management for chemical safety at DOST-MIRDC. Works offline.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
   "background_color": "#ffffff",
-  "theme_color": "#0d9488",
+  "theme_color": "#0a2540",
   "lang": "en",
   "dir": "ltr",
   "categories": ["productivity", "utilities", "health"],
@@ -17,13 +17,13 @@
       "src": "/icons/icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icons/icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icons/icon-maskable-192.png",

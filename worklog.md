@@ -569,3 +569,38 @@ Verification (Agent Browser, all passed):
 Stage Summary:
 - Pagination complete across the entire app. New files: src/hooks/use-pagination.ts, src/components/common/data-pagination.tsx. Modified: 4 list components (chemical-catalog, chemical-manager, user-manager, sds-manager).
 - Pattern: one reusable hook + one reusable component, dropped into any list with a page size and optional deps. Consistent UX (same "Showing X–Y of Z" footer + numbered nav) everywhere.
+
+---
+Task ID: FAVICON-1
+Agent: Orchestrator
+Task: Replace the browser tab favicon (and all PWA icons) with the DOST-MIRDC logo.
+
+Work Log:
+- User clarified: "change this to a icon of DOST mirdc" with a screenshot showing the browser tab favicon was still the old teal shield-with-flask placeholder.
+- Root cause: the PWA icon files in public/icons/ (icon-192.png, icon-512.png, icon-maskable-*.png, icon.svg) were still the original scaffold assets, and public/manifest.json still referenced them with a stale teal theme_color (#0d9488). The layout.tsx metadata pointed /dost-mirdc-logo.png at the wrong size declaration.
+- Regenerated ALL icon assets from public/dost-mirdc-logo.png (1929x1928 PNG) using Python PIL:
+  - icon-16.png, icon-32.png — crisp favicons for small browser-tab display
+  - icon-192.png, icon-512.png — standard PWA "any" purpose icons (transparent background, just the logo)
+  - icon-maskable-192.png, icon-maskable-512.png — PWA maskable icons composited on a navy #0a2540 background with the logo at the center 80% safe zone (per PWA maskable spec, so Android adaptive icons don't crop the logo)
+  - icon.svg — SVG wrapper embedding the 512x512 PNG as base64 (renders crisply at any size)
+  - logo.svg — synced with icon.svg for any component referencing the standalone logo
+- Updated src/app/layout.tsx metadata.icons:
+  - icon: [16x16, 32x32, 192x192, svg] — full size range so browsers pick the crispest one
+  - shortcut: icon-32.png
+  - apple: icon-192.png
+- Rewrote public/manifest.json:
+  - theme_color: #0d9488 (teal) → #0a2540 (navy) — matches the rebrand
+  - name: added "— DOST-MIRDC Safety Data Sheet System"
+  - icons array now lists all 5 assets with correct purpose (any vs maskable) — the old manifest had everything marked "any maskable" which is invalid (maskable icons must be on a full-bleed background)
+- Verification (all passed):
+  - All 7 icon files + manifest served HTTP 200 with correct byte sizes.
+  - DOM inspection confirmed 6 <link> tags all pointing to /icons/icon-*.png and /icons/icon.svg (no more /dost-mirdc-logo.png as favicon).
+  - VLM visual confirmation on browser tab: "the browser tab favicon is the DOST-MIRDC logo (the circular emblem with text around it)... a circular gear-like emblem with four blue and black rounded lobes/petals... It is not a generic teal shield or flask icon."
+  - bun run lint: src/ clean (only pre-existing upload/ example error remains).
+- Screenshot saved: icon-verify.png.
+
+Stage Summary:
+- Browser tab favicon + all PWA/installable app icons + Apple touch icon + maskable Android icons now all use the real DOST-MIRDC logo.
+- Manifest theme_color corrected to navy #0a2540 (was stale teal).
+- Files modified: src/app/layout.tsx (metadata.icons), public/manifest.json (full rewrite).
+- Files regenerated: public/icons/icon-16.png, icon-32.png, icon-192.png, icon-512.png, icon-maskable-192.png, icon-maskable-512.png, icon.svg, public/logo.svg.
