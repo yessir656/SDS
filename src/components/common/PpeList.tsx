@@ -27,8 +27,8 @@ import type { PpeItem, PpeCode } from "@/types";
 import { normalizePpe } from "@/lib/ppe";
 
 const ICON_COLORS: Record<PpeCode, string> = {
-  "gloves": "text-teal-600",
-  "gloves-powderfree": "text-teal-600",
+  "gloves": "text-navy-600",
+  "gloves-powderfree": "text-navy-600",
   "goggles": "text-blue-600",
   "face-shield": "text-green-600",
   "mask": "text-amber-600",
@@ -86,7 +86,7 @@ export function PpeList({ items, compact = false, iconsOnly = false }: PpeListPr
           return (
             <span
               key={`${p.label}-${i}`}
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/50"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-navy-100 dark:bg-navy-900/50"
               title={`${p.label}${p.note ? ` — ${p.note}` : ""}`}
               aria-label={`PPE: ${p.label}`}
             >
@@ -108,8 +108,8 @@ export function PpeList({ items, compact = false, iconsOnly = false }: PpeListPr
         const Icon = ICON_MAP[p.code] ?? ICON_MAP.other;
         const color = ICON_COLORS[p.code] ?? ICON_COLORS.other;
         const base = compact
-          ? "inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-100 px-1.5 py-0.5 text-xs font-medium text-teal-900 dark:border-teal-700 dark:bg-teal-900/50 dark:text-teal-100"
-          : "inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-100 px-3 py-2 text-sm font-medium text-teal-900 dark:border-teal-700 dark:bg-teal-900/50 dark:text-teal-100";
+          ? "inline-flex items-center gap-1 rounded-md border border-navy-200 bg-navy-100 px-1.5 py-0.5 text-xs font-medium text-navy-900 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-100"
+          : "inline-flex items-center gap-2 rounded-lg border border-navy-200 bg-navy-100 px-3 py-2 text-sm font-medium text-navy-900 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-100";
         return (
           <span key={`${p.label}-${i}`} className={base}>
             <Icon className={`h-4 w-4 ${color}`} aria-hidden />

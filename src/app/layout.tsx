@@ -16,26 +16,27 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SDS-CHEM — Safety Data Sheet Centralized System",
+  title: "SDS-CHEM — DOST-MIRDC Safety Data Sheet System",
   description:
-    "Centralized Safety Data Sheet (SDS) management for chemical safety at MIRDC. Works offline, no login required.",
+    "Centralized Safety Data Sheet (SDS) management for chemical safety at the DOST-MIRDC. Works offline, no login required.",
   keywords: [
     "SDS",
     "Safety Data Sheet",
     "chemical safety",
     "GHS",
     "MIRDC",
+    "DOST",
     "laboratory safety",
     "PWA",
   ],
-  authors: [{ name: "MIRDC" }],
+  authors: [{ name: "DOST-MIRDC" }],
   manifest: "/manifest.json",
   icons: {
     icon: [
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/dost-mirdc-logo.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon.svg", sizes: "any", type: "image/svg+xml" },
     ],
-    apple: [{ url: "/icons/icon-192.png", sizes: "192x192" }],
+    apple: [{ url: "/dost-mirdc-logo.png", sizes: "192x192" }],
   },
   appleWebApp: {
     capable: true,
@@ -44,15 +45,15 @@ export const metadata: Metadata = {
   },
   applicationName: "SDS-CHEM",
   openGraph: {
-    title: "SDS-CHEM — Safety Data Sheet System",
+    title: "SDS-CHEM — DOST-MIRDC Safety Data Sheet System",
     description:
-      "Centralized SDS management for chemical safety. Offline-first PWA.",
+      "Centralized SDS management for chemical safety at DOST-MIRDC. Offline-first PWA.",
     type: "website",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0d9488",
+  themeColor: "#0a2540",
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,

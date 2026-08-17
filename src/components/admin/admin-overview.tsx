@@ -63,7 +63,7 @@ export function AdminOverview() {
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center py-20">
-        <RefreshCw className="h-6 w-6 animate-spin text-teal-600" />
+        <RefreshCw className="h-6 w-6 animate-spin text-navy-600" />
       </div>
     );
   }
@@ -86,7 +86,7 @@ export function AdminOverview() {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard icon={<FlaskConical className="h-4 w-4" />} label="Total Chemicals" value={data.totalChemicals} accent="teal" />
+        <StatCard icon={<FlaskConical className="h-4 w-4" />} label="Total Chemicals" value={data.totalChemicals} accent="navy" />
         <StatCard icon={<FileText className="h-4 w-4" />} label="Total SDS" value={data.totalSds} accent="slate" />
         <StatCard icon={<FileCheck className="h-4 w-4" />} label="Available SDS" value={data.availableSds} accent="emerald" />
         <StatCard icon={<FileWarning className="h-4 w-4" />} label="Placeholder SDS" value={data.placeholderSds} accent="amber" />
@@ -95,7 +95,7 @@ export function AdminOverview() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Activity className="h-4 w-4 text-teal-600" />
+            <Activity className="h-4 w-4 text-navy-600" />
             Recent Activity
           </CardTitle>
         </CardHeader>
@@ -139,14 +139,14 @@ export function AdminOverview() {
 }
 
 const ACCENT_STYLES: Record<string, string> = {
-  teal: "border-teal-200 bg-teal-50/50 dark:border-teal-900 dark:bg-teal-950/30",
+  navy: "border-navy-200 bg-navy-50/50 dark:border-navy-900 dark:bg-navy-950/30",
   slate: "border-slate-200 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30",
   emerald: "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30",
   amber: "border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/30",
 };
 
 const ACCENT_ICON: Record<string, string> = {
-  teal: "bg-teal-600 text-white",
+  navy: "bg-navy-600 text-white",
   slate: "bg-slate-600 text-white",
   emerald: "bg-emerald-600 text-white",
   amber: "bg-amber-500 text-white",

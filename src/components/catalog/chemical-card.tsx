@@ -36,7 +36,7 @@ function ChemicalCardInner({ chemical }: ChemicalCardProps) {
         }
       }}
       className={cn(
-        "group relative cursor-pointer overflow-hidden transition-all duration-200 hover:border-teal-400 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative cursor-pointer overflow-hidden transition-all duration-200 hover:border-navy-400 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isDanger && "border-l-4 border-l-red-500",
         !isDanger && "border-l-4 border-l-amber-400"
       )}
@@ -45,7 +45,7 @@ function ChemicalCardInner({ chemical }: ChemicalCardProps) {
         {/* Top: name + signal word */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-base font-semibold text-foreground group-hover:text-teal-700 dark:group-hover:text-teal-400">
+            <h3 className="truncate text-base font-semibold text-foreground group-hover:text-navy-700 dark:group-hover:text-navy-400">
               {chemical.chemicalName}
             </h3>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
@@ -116,7 +116,7 @@ function ChemicalCardInner({ chemical }: ChemicalCardProps) {
               <span className="truncate">{chemical.department}</span>
             </span>
           </div>
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-teal-600" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-navy-600" />
         </div>
 
         {/* Emergency quick-access hint */}

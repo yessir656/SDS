@@ -37,6 +37,30 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /* ============================================================
+   * DOST-MIRDC brand palette — navy blue (primary theme color).
+   * Extracted from the official DOST-MIRDC brand guidelines.
+   * Navy-900 is the canonical brand navy; lighter shades are tints
+   * for backgrounds/borders, darker shades for hover/active states.
+   * ============================================================ */
+  --color-navy-50: #f0f4f8;
+  --color-navy-100: #d9e2ec;
+  --color-navy-200: #bcccdc;
+  --color-navy-300: #9fb3c8;
+  --color-navy-400: #627d98;
+  --color-navy-500: #486581;
+  --color-navy-600: #334e68;
+  --color-navy-700: #243b53;
+  --color-navy-800: #102a43;
+  --color-navy-900: #0a2540;
+  --color-navy-950: #061a30;
+
+  /* MIRDC accent — cyan from the logo, used sparingly for highlights */
+  --color-mirdc-cyan: #00aeef;
+  /* MIRDC accent — red from the logo, used for emergency/danger emphasis */
+  --color-mirdc-red: #ed1c24;
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -81,7 +105,8 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  /* DOST-MIRDC navy blue — the official brand primary color */
+  --primary: #0a2540;
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -92,15 +117,15 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --ring: #334e68;
+  --chart-1: #0a2540;
+  --chart-2: #00aeef;
+  --chart-3: #486581;
+  --chart-4: #ed1c24;
+  --chart-5: #9fb3c8;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary: #0a2540;
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
@@ -115,8 +140,9 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  /* Lighter navy in dark mode for contrast against dark backgrounds */
+  --primary: #486581;
+  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -126,15 +152,15 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --ring: #627d98;
+  --chart-1: #9fb3c8;
+  --chart-2: #00aeef;
+  --chart-3: #627d98;
+  --chart-4: #ed1c24;
+  --chart-5: #334e68;
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary: #486581;
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);

@@ -12,8 +12,8 @@ import { useState, useEffect } from "react";
 import { signOut, useSession } from "next-auth/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
-  FlaskConical,
   LayoutDashboard,
   Beaker,
   FileText,
@@ -55,7 +55,7 @@ export default function AdminDashboardPage() {
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        <Loader2 className="h-8 w-8 animate-spin text-navy-600" />
       </div>
     );
   }
@@ -64,7 +64,7 @@ export default function AdminDashboardPage() {
   if (!session) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        <Loader2 className="h-8 w-8 animate-spin text-navy-600" />
       </div>
     );
   }
@@ -74,9 +74,14 @@ export default function AdminDashboardPage() {
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-lg">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-600 text-white">
-            <FlaskConical className="h-5 w-5" />
-          </span>
+          <Image
+            src="/dost-mirdc-logo.png"
+            alt="DOST-MIRDC"
+            width={36}
+            height={36}
+            className="h-9 w-9 shrink-0 rounded-md object-contain"
+            priority
+          />
           <div className="hidden flex-col leading-none sm:flex">
             <span className="text-base font-bold">SDS-CHEM Admin</span>
             <span className="text-[11px] text-muted-foreground">

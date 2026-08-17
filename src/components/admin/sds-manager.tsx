@@ -138,7 +138,7 @@ export function SdsManager() {
                 {loading ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-muted-foreground">
-                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
+                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-navy-600" />
                     </td>
                   </tr>
                 ) : filtered.length === 0 ? (
@@ -321,7 +321,7 @@ function UploadDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Upload className="h-5 w-5 text-teal-600" />
+            <Upload className="h-5 w-5 text-navy-600" />
             Upload SDS for {row.chemicalName}
           </DialogTitle>
           <DialogDescription>
@@ -343,7 +343,7 @@ function UploadDialog({
 
           {file && (
             <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm">
-              <FileText className="h-4 w-4 text-teal-600" />
+              <FileText className="h-4 w-4 text-navy-600" />
               <span className="flex-1 truncate">{file.name}</span>
               <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
               <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setFile(null); if (inputRef.current) inputRef.current.value = ""; }}>

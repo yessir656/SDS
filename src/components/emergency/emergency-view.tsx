@@ -157,10 +157,10 @@ export function EmergencyView() {
         />
 
         {/* Required PPE */}
-        <Card className="border-2 border-teal-300 dark:border-teal-800">
+        <Card className="border-2 border-navy-300 dark:border-navy-800">
           <CardContent className="p-4">
             <h2 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-muted-foreground">
-              <HardHat className="h-4 w-4 text-teal-600" />
+              <HardHat className="h-4 w-4 text-navy-600" />
               Required Personal Protective Equipment
             </h2>
             <PpeList items={chemical.personalProtectiveEquipment} />

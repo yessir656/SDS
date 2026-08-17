@@ -1,10 +1,11 @@
 "use client";
 
 // ============================================================================
-// AppHeader — top navigation bar with logo, title, status, theme toggle
+// AppHeader — top navigation bar with DOST-MIRDC logo, title, status, theme toggle
 // ============================================================================
 
-import { FlaskConical, ShieldAlert } from "lucide-react";
+import Image from "next/image";
+import { ShieldAlert } from "lucide-react";
 import { OfflineIndicator } from "@/components/common/offline-indicator";
 import { SyncStatusIndicator } from "@/components/common/sync-status-indicator";
 import { ThemeToggle } from "@/components/common/theme-toggle";
@@ -23,15 +24,20 @@ export function AppHeader() {
           className="flex items-center gap-2.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="SDS-CHEM home"
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm">
-            <FlaskConical className="h-5 w-5" />
-          </span>
+          <Image
+            src="/dost-mirdc-logo.png"
+            alt="DOST-MIRDC logo"
+            width={36}
+            height={36}
+            className="h-9 w-9 shrink-0 rounded-md object-contain"
+            priority
+          />
           <span className="hidden flex-col items-start leading-none sm:flex">
             <span className="text-base font-bold tracking-tight text-foreground">
               SDS-CHEM
             </span>
             <span className="text-[11px] text-muted-foreground">
-              Safety Data Sheet System
+              DOST-MIRDC Safety Data Sheet System
             </span>
           </span>
           <span className="text-base font-bold tracking-tight text-foreground sm:hidden">

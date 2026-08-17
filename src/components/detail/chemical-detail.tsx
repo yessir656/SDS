@@ -138,7 +138,7 @@ export function ChemicalDetail() {
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-2 border-teal-600 text-teal-700 hover:bg-teal-50 dark:border-teal-400 dark:text-teal-300"
+                className="gap-2 border-navy-600 text-navy-700 hover:bg-navy-50 dark:border-navy-400 dark:text-navy-300"
               >
                 <HardHat className="h-4 w-4" />
                 <span className="hidden sm:inline">PPE Info</span>
@@ -260,7 +260,7 @@ export function ChemicalDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
-                <FileText className="h-4 w-4 text-teal-600" />
+                <FileText className="h-4 w-4 text-navy-600" />
                 SDS Section Quick-Reference
               </CardTitle>
             </CardHeader>
@@ -383,7 +383,7 @@ export function ChemicalDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
-                <HardHat className="h-4 w-4 text-teal-600" />
+                <HardHat className="h-4 w-4 text-navy-600" />
                 Required PPE
               </CardTitle>
             </CardHeader>
@@ -397,7 +397,7 @@ export function ChemicalDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
-                <FileText className="h-4 w-4 text-teal-600" />
+                <FileText className="h-4 w-4 text-navy-600" />
                 SDS Document
               </CardTitle>
             </CardHeader>
@@ -472,7 +472,7 @@ export function ChemicalDetail() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Clock className="h-4 w-4 text-teal-600" />
+            <Clock className="h-4 w-4 text-navy-600" />
             Safety Instructions
           </CardTitle>
         </CardHeader>

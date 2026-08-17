@@ -379,7 +379,7 @@ export function SystemSettings() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <DatabaseIcon className="h-4 w-4 text-teal-600" />
+              <DatabaseIcon className="h-4 w-4 text-navy-600" />
               Database
             </CardTitle>
           </CardHeader>

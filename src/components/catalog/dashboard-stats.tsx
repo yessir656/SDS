@@ -30,7 +30,7 @@ export function DashboardStats() {
           icon={<FlaskConical className="h-4 w-4" />}
           label="Total Chemicals"
           value={stats.totalChemicals}
-          accent="teal"
+          accent="navy"
         />
         <StatCard
           icon={<ShieldAlert className="h-4 w-4" />}
@@ -83,7 +83,7 @@ export function DashboardStats() {
                         </div>
                         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
                           <div
-                            className="h-full rounded-full bg-teal-500 transition-all duration-500"
+                            className="h-full rounded-full bg-navy-500 transition-all duration-500"
                             style={{ width: `${pct}%` }}
                           />
                         </div>
@@ -107,14 +107,14 @@ export function DashboardStats() {
                 const pct = Math.round((d.count / max) * 100);
                 return (
                   <div key={d.department} className="flex items-center gap-3">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-teal-50 text-xs font-bold text-teal-700 dark:bg-teal-950 dark:text-teal-300">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-navy-50 text-xs font-bold text-navy-700 dark:bg-navy-950 dark:text-navy-300">
                       {d.count}
                     </div>
                     <div className="flex-1">
                       <span className="text-xs font-medium">{d.department}</span>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
                         <div
-                          className="h-full rounded-full bg-teal-600/70 transition-all duration-500"
+                          className="h-full rounded-full bg-navy-600/70 transition-all duration-500"
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -133,14 +133,14 @@ export function DashboardStats() {
 // ---------------------------------------------------------------------------
 
 const ACCENT_STYLES: Record<string, string> = {
-  teal: "border-teal-200 bg-teal-50/50 dark:border-teal-900 dark:bg-teal-950/30",
+  navy: "border-navy-200 bg-navy-50/50 dark:border-navy-900 dark:bg-navy-950/30",
   red: "border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/30",
   amber: "border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/30",
   slate: "border-slate-200 bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/30",
 };
 
 const ACCENT_ICON: Record<string, string> = {
-  teal: "bg-teal-600 text-white",
+  navy: "bg-navy-600 text-white",
   red: "bg-red-600 text-white",
   amber: "bg-amber-500 text-white",
   slate: "bg-slate-600 text-white",

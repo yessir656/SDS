@@ -55,7 +55,7 @@ interface AuditEntry {
 // ---------------------------------------------------------------------------
 
 const ENTITY_COLORS: Record<string, string> = {
-  chemical: "bg-teal-100 text-teal-900 dark:bg-teal-900/40 dark:text-teal-200",
+  chemical: "bg-navy-100 text-navy-900 dark:bg-navy-900/40 dark:text-navy-200",
   sds: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200",
   user: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
   session: "bg-violet-100 text-violet-900 dark:bg-violet-900/40 dark:text-violet-200",

@@ -5,7 +5,8 @@
 // Catalog → Detail → Emergency views all render here via Zustand state.
 // ============================================================================
 
-import { FlaskConical, Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { AppHeader } from "@/components/layout/app-header";
 import { AppFooter } from "@/components/layout/app-footer";
@@ -29,10 +30,15 @@ export default function Home() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
         <div className="relative flex h-16 w-16 items-center justify-center">
-          <span className="absolute inset-0 animate-ping rounded-2xl bg-teal-600/20" />
-          <span className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-lg">
-            <FlaskConical className="h-7 w-7" />
-          </span>
+          <span className="absolute inset-0 animate-ping rounded-2xl bg-navy-600/20" />
+          <Image
+            src="/dost-mirdc-logo.png"
+            alt="DOST-MIRDC"
+            width={56}
+            height={56}
+            className="relative h-14 w-14 rounded-2xl object-contain shadow-lg"
+            priority
+          />
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />

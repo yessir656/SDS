@@ -42,7 +42,7 @@ export default function ChangePasswordPage() {
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
+        <Loader2 className="h-6 w-6 animate-spin text-navy-600" />
       </div>
     );
   }

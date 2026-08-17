@@ -162,7 +162,7 @@ export function ChemicalManager() {
                 {loading ? (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-muted-foreground">
-                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-teal-600" />
+                      <Loader2 className="mx-auto h-6 w-6 animate-spin text-navy-600" />
                     </td>
                   </tr>
                 ) : filtered.length === 0 ? (
@@ -493,13 +493,13 @@ function ChemicalFormDialog({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Auto-fill from PDF banner / button */}
-          <div className="space-y-2 rounded-lg border border-teal-200 bg-teal-50/60 p-3 dark:border-teal-900 dark:bg-teal-950/40">
+          <div className="space-y-2 rounded-lg border border-navy-200 bg-navy-50/60 p-3 dark:border-navy-900 dark:bg-navy-950/40">
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                className="gap-2 border-teal-400 text-teal-700 hover:bg-teal-100 dark:border-teal-800 dark:text-teal-300 dark:hover:bg-teal-900/40"
+                className="gap-2 border-navy-400 text-navy-700 hover:bg-navy-100 dark:border-navy-800 dark:text-navy-300 dark:hover:bg-navy-900/40"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={extracting || saving}
               >
@@ -517,7 +517,7 @@ function ChemicalFormDialog({
 
             {/* Loading state */}
             {extracting && (
-              <div className="flex items-center gap-2 text-xs text-teal-700 dark:text-teal-300">
+              <div className="flex items-center gap-2 text-xs text-navy-700 dark:text-navy-300">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Converting PDF to images, then reading with AI… This takes ~10-15 seconds for multi-page documents.
               </div>
@@ -544,7 +544,7 @@ function ChemicalFormDialog({
 
             {/* Review banner */}
             {extractedFromPdf && !extracting && (
-              <div className="flex items-start gap-2 rounded-md border border-teal-300 bg-teal-100/70 px-3 py-2 text-xs text-teal-800 dark:border-teal-700 dark:bg-teal-900/50 dark:text-teal-200">
+              <div className="flex items-start gap-2 rounded-md border border-navy-300 bg-navy-100/70 px-3 py-2 text-xs text-navy-800 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-200">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="flex-1">
                   <div className="font-semibold">Auto-filled from PDF</div>
@@ -552,7 +552,7 @@ function ChemicalFormDialog({
                 </div>
                 <button
                   type="button"
-                  className="shrink-0 rounded p-0.5 hover:bg-teal-200 dark:hover:bg-teal-800"
+                  className="shrink-0 rounded p-0.5 hover:bg-navy-200 dark:hover:bg-navy-800"
                   onClick={() => setExtractedFromPdf(false)}
                   aria-label="Dismiss review banner"
                 >
@@ -658,8 +658,8 @@ function ChemicalFormDialog({
                   className={cn(
                     "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                     form.ghsPictograms.includes(p)
-                      ? "bg-teal-600 text-white border-teal-600"
-                      : "bg-background hover:border-teal-400"
+                      ? "bg-navy-600 text-white border-navy-600"
+                      : "bg-background hover:border-navy-400"
                   )}
                 >
                   {GHS_PICTOGRAM_INFO[p].label}
@@ -680,8 +680,8 @@ function ChemicalFormDialog({
                   className={cn(
                     "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
                     form.hazardClasses.includes(hc)
-                      ? "bg-teal-600 text-white border-teal-600"
-                      : "bg-background hover:border-teal-400"
+                      ? "bg-navy-600 text-white border-navy-600"
+                      : "bg-background hover:border-navy-400"
                   )}
                 >
                   {HAZARD_CLASS_LABELS[hc]}

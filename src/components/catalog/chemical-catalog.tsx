@@ -60,7 +60,7 @@ export function ChemicalCatalog() {
             <SlidersHorizontal className="h-4 w-4" />
             Filters
             {activeFilterCount > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-teal-600 px-1 text-xs font-bold text-white">
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-navy-600 px-1 text-xs font-bold text-white">
                 {activeFilterCount}
               </span>
             )}

@@ -487,3 +487,50 @@ Stage Summary:
 - `.env` restored with all required vars. `NEXTAUTH_URL` intentionally omitted in favor of `trustHost: true` (supports both localhost and preview gateway URLs).
 - Files modified: `.env` (regenerated), `src/lib/auth.ts` (added `trustHost: true`).
 - Dev server restarted cleanly (orphaned processes killed, new PID 2245).
+
+---
+Task ID: UI-REDESIGN-1
+Agent: Orchestrator
+Task: Rebrand the entire SDS-CHEM UI with DOST-MIRDC's official navy blue theme color + integrate the real DOST-MIRDC logo.
+
+Work Log:
+- User confirmed DOST-MIRDC's theme color is **navy blue** (not the cyan #00AEEF from the logo — that's an accent only).
+- Copied the official DOST-MIRDC logo from upload/DOST-MIRDC-logo.png to public/dost-mirdc-logo.png (88KB, 1929x1928 PNG with transparency).
+- Defined a complete navy blue palette in src/app/globals.css @theme block:
+  - navy-50 (#f0f4f8) through navy-950 (#061a30) — 11 shades following the Refactoring UI "Colors" palette (professional, government-appropriate).
+  - navy-900 (#0a2540) is the canonical brand navy.
+  - Also added mirdc-cyan (#00AEEF) and mirdc-red (#ED1C24) as accent tokens for future use.
+- Updated CSS custom properties:
+  - :root --primary from neutral dark (oklch 0.205) to #0a2540 (navy-900).
+  - .dark --primary from light gray (oklch 0.922) to #486581 (navy-500, lighter for dark mode contrast).
+  - --ring, --sidebar-primary, --chart-1 through --chart-5 all updated to navy palette.
+- Project-wide find/replace: teal-* → navy-* across all 18 .tsx files (52 occurrences). Zero teal references remain in src/.
+- Logo integration — replaced the generic FlaskConical icon with the real DOST-MIRDC logo (via next/image) in:
+  - src/components/layout/app-header.tsx (public header — 36px logo)
+  - src/components/layout/app-footer.tsx (footer — 20px logo + full agency name "Department of Science and Technology · Metals Industry Research & Development Center")
+  - src/app/admin/page.tsx (admin dashboard header — 36px logo)
+  - src/app/admin/login/page.tsx (login page — 64px centered logo with gradient navy background)
+  - src/app/page.tsx (loading screen — 56px logo replacing the flask icon)
+- Updated src/app/layout.tsx:
+  - metadata.title: "SDS-CHEM — DOST-MIRDC Safety Data Sheet System"
+  - metadata.description: mentions DOST-MIRDC explicitly
+  - metadata.authors: "DOST-MIRDC"
+  - metadata.icons: uses /dost-mirdc-logo.png as favicon
+  - viewport.themeColor: #0a2540 (navy, was #0d9488 teal)
+- Login page enhanced: navy gradient background (from-navy-50 via-background to-navy-100/50 in light, navy-950 variants in dark), card with navy border tint and shadow-lg, "Administrator Access" title, "DOST-MIRDC · Administrator Sign In" subtitle.
+- Fixed accent key mismatch: the StatCard accent color maps in admin-overview.tsx and dashboard-stats.tsx had `teal:` keys but the calls now pass `accent="navy"`. Renamed keys from `teal:` to `navy:` in both ACCENT_STYLES and ACCENT_ICON maps.
+- Verification (all passed):
+  - `bun run lint` — clean on src/ (1 pre-existing error in upload/ examples, out of scope).
+  - Dev server healthy: GET / → 200, GET /admin/login → 200, GET /dost-mirdc-logo.png → 200.
+  - VLM analysis of catalog screenshot: "navy blue for the header text, icon backgrounds, and progress bars... DOST-MIRDC logo is clearly visible in the top-left corner next to the SDS-CHEM title and again in the footer... overall color scheme is dominated by navy blue accents."
+  - VLM analysis of login screenshot: "DOST-MIRDC logo is prominently displayed at the top center... Sign In button is indeed navy blue... clean, well-centered, and professional."
+- Screenshots saved: ui-redesign-catalog.png, ui-redesign-login.png.
+
+Stage Summary:
+- Full UI rebrand to DOST-MIRDC navy blue theme complete.
+- Real DOST-MIRDC logo integrated in 5 locations (public header, footer, admin header, login page, loading screen).
+- 52 teal color references replaced with navy across 18 files.
+- CSS theme system updated: --primary, --ring, --sidebar-primary, --chart-* all set to navy palette.
+- Favicon + metadata + theme-color all updated to reflect DOST-MIRDC branding.
+- Files modified: src/app/globals.css, src/app/layout.tsx, src/app/page.tsx, src/app/admin/page.tsx, src/app/admin/login/page.tsx, src/components/layout/app-header.tsx, src/components/layout/app-footer.tsx, src/components/admin/admin-overview.tsx, src/components/admin/audit-log-viewer.tsx, src/components/admin/chemical-manager.tsx, src/components/admin/sds-manager.tsx, src/components/admin/system-settings.tsx, src/components/admin/user-manager.tsx, src/components/catalog/chemical-card.tsx, src/components/catalog/chemical-catalog.tsx, src/components/catalog/dashboard-stats.tsx, src/components/catalog/filter-panel.tsx, src/components/common/PpeList.tsx, src/components/detail/chemical-detail.tsx, src/components/emergency/emergency-view.tsx, src/app/admin/change-password/page.tsx (21 files).
+- New asset: public/dost-mirdc-logo.png.

@@ -7,7 +7,8 @@
 import { useState, useEffect } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { FlaskConical, Loader2, ShieldAlert } from "lucide-react";
+import Image from "next/image";
+import { Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,22 +55,32 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-4 dark:bg-slate-950">
-      <div className="mb-6 flex items-center gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-teal-600 text-white shadow-lg">
-          <FlaskConical className="h-6 w-6" />
-        </span>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-navy-50 via-background to-navy-100/50 px-4 dark:from-navy-950 dark:via-background dark:to-navy-950/50">
+      {/* MIRDC logo + agency name */}
+      <div className="mb-6 flex flex-col items-center gap-3 text-center">
+        <Image
+          src="/dost-mirdc-logo.png"
+          alt="DOST-MIRDC logo"
+          width={64}
+          height={64}
+          className="h-16 w-16 rounded-lg object-contain shadow-sm"
+          priority
+        />
         <div>
-          <h1 className="text-xl font-bold text-foreground">SDS-CHEM</h1>
-          <p className="text-xs text-muted-foreground">Admin Login</p>
+          <h1 className="text-xl font-bold tracking-tight text-foreground">
+            SDS-CHEM
+          </h1>
+          <p className="text-xs text-muted-foreground">
+            DOST-MIRDC · Administrator Sign In
+          </p>
         </div>
       </div>
 
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-sm border-navy-200/60 shadow-lg dark:border-navy-800/60">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
-            <ShieldAlert className="h-5 w-5 text-teal-600" />
-            Administrator Sign In
+            <ShieldAlert className="h-5 w-5 text-navy-600" />
+            Administrator Access
           </CardTitle>
         </CardHeader>
         <CardContent>

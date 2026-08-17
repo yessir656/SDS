@@ -206,8 +206,8 @@ function FilterChip({
 }) {
   const variants: Record<string, string> = {
     default: active
-      ? "bg-teal-600 text-white border-teal-600 hover:bg-teal-700"
-      : "bg-background text-foreground border-border hover:border-teal-400 hover:bg-accent",
+      ? "bg-navy-600 text-white border-navy-600 hover:bg-navy-700"
+      : "bg-background text-foreground border-border hover:border-navy-400 hover:bg-accent",
     danger: active
       ? "bg-red-600 text-white border-red-600 hover:bg-red-700"
       : "bg-background text-foreground border-border hover:border-red-400 hover:bg-accent",
