@@ -47,11 +47,14 @@ const nextConfig: NextConfig = {
   // turbopack bundler cannot resolve. Marking it as a server external package
   // tells Next.js to require it at runtime from node_modules instead of trying
   // to bundle it. Same for pdfjs-dist (large, uses dynamic imports) and
-  // @google/generative-ai (uses dynamic imports for streaming).
+  // @google/generative-ai (uses dynamic imports for streaming). tesseract.js
+  // spawns its own worker thread and loads WASM via internal file paths —
+  // bundling it breaks those lookups and the OCR request hangs indefinitely.
   serverExternalPackages: [
     "@napi-rs/canvas",
     "pdfjs-dist",
     "@google/generative-ai",
+    "tesseract.js",
   ],
   async headers() {
     return [

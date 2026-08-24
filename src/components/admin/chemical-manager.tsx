@@ -16,7 +16,9 @@ import {
   FileText,
   AlertCircle,
   CheckCircle2,
+  Files,
 } from "lucide-react";
+import { BulkImportDialog } from "@/components/admin/bulk-import";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,12 +90,23 @@ interface AdminChemical {
   createdAt: number;
 }
 
+// Extraction pipeline methods returned by /api/admin/sds/extract.
+// "embedded-text" and "ocr" run free + offline locally; "ai" consumed quota.
+type ExtractMethod = "embedded-text" | "ocr" | "ai";
+
+const EXTRACT_METHOD_LABELS: Record<ExtractMethod, string> = {
+  "embedded-text": "Embedded text · free & offline",
+  ocr: "Local OCR · free & offline",
+  ai: "Gemini AI",
+};
+
 export function ChemicalManager() {
   const [chemicals, setChemicals] = useState<AdminChemical[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<AdminChemical | null>(null);
   const [creating, setCreating] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AdminChemical | null>(null);
 
   const fetchChemicals = useCallback(async () => {
@@ -147,6 +160,13 @@ export function ChemicalManager() {
         </div>
         <Button onClick={() => setCreating(true)} className="gap-2">
           <Plus className="h-4 w-4" /> Add Chemical
+        </Button>
+        <Button
+          onClick={() => setBulkOpen(true)}
+          variant="outline"
+          className="gap-2"
+        >
+          <Files className="h-4 w-4" /> Bulk Import
         </Button>
         <Button onClick={fetchChemicals} variant="outline" size="icon" className="h-10 w-10">
           <RefreshCw className="h-4 w-4" />
@@ -260,6 +280,13 @@ export function ChemicalManager() {
         />
       )}
 
+      {/* Bulk SDS PDF import */}
+      <BulkImportDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onImported={fetchChemicals}
+      />
+
       {/* Delete confirmation */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
@@ -359,28 +386,35 @@ function ChemicalFormDialog({
   const [extracting, setExtracting] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [extractedFromPdf, setExtractedFromPdf] = useState(false);
+  // Which pipeline produced the current auto-fill ("embedded-text"/"ocr" are
+  // free+offline; "ai" consumed quota). Drives the badge + Retry-with-AI.
+  const [extractMethod, setExtractMethod] = useState<ExtractMethod | null>(null);
+  const [extractNotice, setExtractNotice] = useState<string | null>(null);
+  const [extractLabel, setExtractLabel] = useState("Reading SDS document…");
+  const lastFileRef = useRef<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isEdit = !!chemical;
 
   // ---------------------------------------------------------------------------
-  // AI auto-fill handler.
-  // Sends the selected PDF to /api/admin/sds/extract, then merges the returned
-  // fields into the form state. The `id` field is preserved (admin must enter
-  // it manually in create mode).
+  // Auto-fill extraction — runs the tiered pipeline on the selected PDF.
+  // Default (forceAI=false): free local tiers (embedded text → OCR), AI only
+  // fires server-side if those come back empty/garbage. forceAI=true is the
+  // "Retry with AI" escape hatch and goes straight to the vision model.
   // ---------------------------------------------------------------------------
-  const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // Reset the input value so the same file can be re-selected later.
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (!file) return;
-
+  const runExtraction = async (file: File, forceAI: boolean) => {
     setExtracting(true);
     setExtractError(null);
+    setExtractLabel(
+      forceAI
+        ? "Asking Gemini AI to read the SDS… (~10-15 seconds)"
+        : "Extracting locally — embedded text / OCR first, AI only if needed…"
+    );
 
     try {
       const fd = new FormData();
       fd.append("file", file);
+      if (forceAI) fd.append("forceAI", "true");
 
       const res = await fetch("/api/admin/sds/extract", {
         method: "POST",
@@ -445,6 +479,15 @@ function ChemicalFormDialog({
           d.accidentalReleaseMeasures || prev.accidentalReleaseMeasures,
       }));
 
+      // Record which pipeline produced the result so the UI can badge it and
+      // offer "Retry with AI" for free-tier results.
+      const rawMethod = typeof json.method === "string" ? json.method : "";
+      setExtractMethod(
+        rawMethod === "embedded-text" || rawMethod === "ocr" || rawMethod === "ai"
+          ? (rawMethod as ExtractMethod)
+          : null
+      );
+      setExtractNotice(typeof json.notice === "string" && json.notice ? json.notice : null);
       setExtractedFromPdf(true);
     } catch (err) {
       setExtractError(err instanceof Error ? err.message : "Auto-fill failed");
@@ -452,6 +495,23 @@ function ChemicalFormDialog({
     } finally {
       setExtracting(false);
     }
+  };
+
+  /** File-input change — first extraction always uses the free local tiers. */
+  const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input value so the same file can be re-selected later.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!file) return;
+    lastFileRef.current = file;
+    await runExtraction(file, false);
+  };
+
+  /** Escape hatch — re-run the same file through the vision AI provider. */
+  const handleRetryWithAi = async () => {
+    const file = lastFileRef.current;
+    if (!file || extracting) return;
+    await runExtraction(file, true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -535,7 +595,7 @@ function ChemicalFormDialog({
                 {extracting ? "Reading SDS document…" : "Auto-fill from PDF"}
               </Button>
               <span className="text-xs text-muted-foreground">
-                Upload a scanned or digital SDS PDF — AI will read it and pre-fill the fields below.
+                Upload an SDS PDF — digital files extract instantly and free; scans run offline OCR. Gemini AI is only used as a fallback.
               </span>
             </div>
 
@@ -543,7 +603,7 @@ function ChemicalFormDialog({
             {extracting && (
               <div className="flex items-center gap-2 text-xs text-navy-700 dark:text-navy-300">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Converting PDF to images, then reading with AI… This takes ~10-15 seconds for multi-page documents.
+                {extractLabel}
               </div>
             )}
 
@@ -566,14 +626,45 @@ function ChemicalFormDialog({
               </div>
             )}
 
-            {/* Review banner */}
+            {/* Review banner — shows which pipeline ran + Retry-with-AI escape hatch */}
             {extractedFromPdf && !extracting && (
               <div className="flex items-start gap-2 rounded-md border border-navy-300 bg-navy-100/70 px-3 py-2 text-xs text-navy-800 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-200">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="flex-1">
-                  <div className="font-semibold">Auto-filled from PDF</div>
-                  <div className="mt-0.5">Please review all fields carefully before saving — AI extraction may have errors or omissions.</div>
+                  <div className="font-semibold">
+                    Auto-filled from PDF{" "}
+                    {extractMethod && (
+                      <Badge
+                        variant="outline"
+                        className={
+                          "ml-1 align-middle text-[10px] font-semibold " +
+                          (extractMethod === "ai"
+                            ? "border-violet-400 bg-violet-50 text-violet-700 dark:border-violet-700 dark:bg-violet-950 dark:text-violet-300"
+                            : "border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-300")
+                        }
+                      >
+                        {EXTRACT_METHOD_LABELS[extractMethod]}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="mt-0.5">Please review all fields carefully before saving — automated extraction may have errors or omissions.</div>
+                  {extractNotice && (
+                    <div className="mt-1 text-amber-700 dark:text-amber-300">{extractNotice}</div>
+                  )}
                 </div>
+                {extractMethod && extractMethod !== "ai" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 gap-1.5 px-2 text-[11px]"
+                    onClick={handleRetryWithAi}
+                    disabled={extracting || saving}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry with AI
+                  </Button>
+                )}
                 <button
                   type="button"
                   className="shrink-0 rounded p-0.5 hover:bg-navy-200 dark:hover:bg-navy-800"

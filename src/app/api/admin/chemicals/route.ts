@@ -1,5 +1,7 @@
 // ============================================================================
-// GET  /api/admin/chemicals — list ALL chemicals (including deleted) for admin
+// GET  /api/admin/chemicals — list ACTIVE chemicals (soft-deleted tombstones
+//                              are hidden; they exist only so /api/sync can
+//                              propagate deletions to PWA clients)
 // POST /api/admin/chemicals — create a new chemical + placeholder SDS
 //
 // Admin-only. Server-side authorization enforced via requireAdmin().
@@ -27,6 +29,7 @@ export async function GET() {
   }
 
   const chemicals = await db.chemical.findMany({
+    where: { deletedAt: null },
     orderBy: { chemicalName: "asc" },
     include: { sdsDocument: true, updatedBy: true },
   });

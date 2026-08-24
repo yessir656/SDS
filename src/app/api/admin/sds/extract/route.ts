@@ -1,24 +1,28 @@
 // ============================================================================
 // POST /api/admin/sds/extract
-//   AI-powered "Auto-fill from PDF" endpoint.
+//   "Auto-fill from PDF" endpoint — TIERED extraction pipeline.
 //
 //   Accepts a multipart upload containing an SDS PDF file. The endpoint:
 //     1. Validates the file (auth + magic bytes + MIME + extension + size).
-//     2. Rasterizes the first 5 pages to PNG using a pure-JavaScript renderer
-//        (pdfjs-dist + @napi-rs/canvas) — NO system dependencies required.
-//     3. Sends all images + a structured extraction prompt to the configured
-//        VLM provider via src/lib/ai-vlm.ts. Provider is selected by the
-//        AI_PROVIDER env var (zai | gemini | openai | anthropic).
-//     4. Parses the JSON response, validates enum values, sanitizes strings.
-//     5. Returns { success: true, data: { ...fields } }.
+//     2. TIERED EXTRACTION (free-first, AI as fallback):
+//        • Tier 1 — Embedded text (src/lib/pdf-text.ts): digital PDFs carry
+//          their own text layer; pdfjs-dist reads it instantly. Free, offline,
+//          exact characters. Covers ~90% of SDS documents.
+//        • Tier 2 — Local OCR (src/lib/ocr.ts): scanned/image-only PDFs get
+//          rasterized and read locally by Tesseract.js. Free, unlimited quota.
+//        • Tier 3 — Vision AI (src/lib/ai-vlm.ts): only used automatically
+//          when the local tiers come up empty/garbage, or when the admin
+//          explicitly requests it via forceAI ("Retry with AI").
+//     3. Field parsing for tiers 1-2 uses deterministic GHS heuristics
+//        (src/lib/sds-local-parse.ts); tier 3 uses the structured VLM prompt.
+//     4. Returns { success: true, data: {...fields}, method, notice? } where
+//        method ∈ "embedded-text" | "ocr" | "ai".
 //
 //   Admin-only. Server-side authorization enforced via requireAdmin().
 //
-//   Provider selection:
-//     AI_PROVIDER=zai       (default) — in-house z-ai-web-dev-sdk, sandbox-only
-//     AI_PROVIDER=gemini              — Google Gemini, free tier, works locally
-//     AI_PROVIDER=openai              — OpenAI gpt-4o-mini, works locally
-//     AI_PROVIDER=anthropic           — Anthropic Claude, works locally
+//   Provider selection (tier 3 only):
+//     AI_PROVIDER=gemini              — Google Gemini (configured in .env)
+//     AI_PROVIDER=openai / anthropic  — alternates
 //
 //   See src/lib/ai-vlm.ts for the provider abstraction and DEVELOPER_GUIDE.md
 //   §6 for setup instructions.
@@ -33,6 +37,9 @@ import {
 } from "@/lib/validation";
 import { isPdf } from "@/lib/storage";
 import { rasterizePdfToPngs } from "@/lib/pdf-rasterize";
+import { extractPdfText } from "@/lib/pdf-text";
+import { ocrPngBuffers } from "@/lib/ocr";
+import { parseSdsText, scoreParse } from "@/lib/sds-local-parse";
 import {
   callVlm,
   resolveProvider,
@@ -41,9 +48,20 @@ import {
   AiRequestError,
 } from "@/lib/ai-vlm";
 
-// Allow this route up to 60s — VLM extraction of multi-page PDFs takes ~10-15s.
-export const maxDuration = 60;
+// Allow this route up to 120s — OCR of 5 pages plus first-run language-data
+// download can take longer than the old vision-only path.
+export const maxDuration = 120;
 export const dynamic = "force-dynamic";
+
+// ---------------------------------------------------------------------------
+// Pipeline thresholds
+// ---------------------------------------------------------------------------
+
+/** Minimum characters of extracted text before we trust a local tier. */
+const TEXT_MIN_CHARS = 200;
+
+/** Minimum parse score (out of 5) before we skip the AI fallback. */
+const PARSE_MIN_SCORE = 2;
 
 // ---------------------------------------------------------------------------
 // Valid enum value sets — used to sanitize VLM output.
@@ -267,135 +285,249 @@ export async function POST(request: Request) {
   }
 
   // ---------------------------------------------------------------------------
-  // Fail fast on missing AI provider config — BEFORE rasterizing the PDF.
-  // This way the user gets an immediate, actionable error (< 100ms) instead
-  // of waiting 10s for rasterization then seeing a config error.
+  // "Retry with AI" escape hatch — admin can bypass the free tiers entirely.
   // ---------------------------------------------------------------------------
+  const forceAI =
+    formData.get("forceAI") === "true" || formData.get("forceAI") === "1";
+
+  // Provider config is only needed when tier 3 actually runs — check lazily so
+  // a missing/misconfigured key doesn't block the free local pipeline.
   const provider = resolveProvider();
-  try {
-    assertProviderConfigured(provider);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { success: false, error: msg },
-      { status: 503 }
-    );
-  }
 
   // ---------------------------------------------------------------------------
-  // Rasterize the PDF to PNG images using a pure-JavaScript renderer.
-  // No system dependencies (Poppler/pdftoppm) required — pdfjs-dist +
-  // @napi-rs/canvas run entirely in-process.
+  // Shared rasterization helper (needed by OCR tier and the AI fallback).
+  // Pure-JavaScript renderer — no system dependencies required.
   // ---------------------------------------------------------------------------
-  let pageImages: Buffer[];
-  try {
-    pageImages = await rasterizePdfToPngs(buffer, {
-      maxPages: 5,
-      scale: 2.0, // ≈ 150 DPI on a standard 72 DPI PDF viewport
-    });
-
-    if (pageImages.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "PDF rasterization produced no images. The PDF may be empty or corrupted.",
-        },
-        { status: 500 }
-      );
+  let pageImagesCache: Buffer[] | null = null;
+  const getPageImages = async (): Promise<Buffer[]> => {
+    if (!pageImagesCache) {
+      pageImagesCache = await rasterizePdfToPngs(buffer, {
+        maxPages: 5,
+        scale: 2.0, // ≈ 150 DPI on a standard 72 DPI PDF viewport
+      });
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      {
-        success: false,
-        error: `Failed to rasterize PDF: ${msg}`,
-      },
-      { status: 500 }
-    );
-  }
+    return pageImagesCache;
+  };
 
   // ---------------------------------------------------------------------------
-  // Send the page images + extraction prompt to the configured VLM provider.
-  // The provider abstraction (src/lib/ai-vlm.ts) handles zai / gemini / openai
-  // / anthropic. We get back a raw text string expected to contain JSON.
+  // TIERED EXTRACTION — free local tiers first.
   // ---------------------------------------------------------------------------
-  let rawResponse: string;
-  try {
-    const result = await callVlm(pageImages, EXTRACTION_PROMPT);
-    rawResponse = result.text;
-  } catch (err) {
-    // AiConfigError — provider credentials missing or invalid.
-    if (err instanceof AiConfigError) {
-      return NextResponse.json(
-        { success: false, error: err.message },
-        { status: 503 }
-      );
+  let parsedFields: ReturnType<typeof parseSdsText> | null = null;
+  let method: "embedded-text" | "ocr" | null = null;
+  let ocrNotice: string | null = null;
+
+  if (!forceAI) {
+    // ---- Tier 1: embedded text (digital PDFs) ------------------------------
+    let textPages: string[] | null = null;
+    let textChars = 0;
+    try {
+      const t = await extractPdfText(buffer, 5);
+      textPages = t.pages;
+      textChars = t.totalChars;
+    } catch {
+      // Corrupt/unreadable text layer — continue to Tier 2.
     }
-    // AiRequestError — the API call itself failed (network / auth / rate limit).
-    if (err instanceof AiRequestError) {
-      return NextResponse.json(
-        { success: false, error: err.message },
-        { status: err.status && err.status >= 400 && err.status < 600 ? err.status : 502 }
-      );
+
+    if (textPages && textChars >= TEXT_MIN_CHARS) {
+      parsedFields = parseSdsText(textPages);
+      method = "embedded-text";
     }
-    // Unknown error — wrap generically.
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { success: false, error: `AI extraction failed: ${msg}` },
-      { status: 500 }
-    );
+
+    // ---- Tier 2: local OCR (scanned/image-only PDFs) -----------------------
+    // Runs when Tier 1 found nothing usable, OR when its parse came back too
+    // weak to trust (e.g. a hybrid document where the useful content is an
+    // image embedded in an otherwise digital page).
+    if (!parsedFields || scoreParse(parsedFields) < PARSE_MIN_SCORE) {
+      let pageImages: Buffer[];
+      try {
+        pageImages = await getPageImages();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return NextResponse.json(
+          { success: false, error: `Failed to rasterize PDF: ${msg}` },
+          { status: 500 }
+        );
+      }
+      if (pageImages.length === 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "PDF rasterization produced no images. The PDF may be empty or corrupted.",
+          },
+          { status: 500 }
+        );
+      }
+
+      try {
+        const ocr = await ocrPngBuffers(pageImages);
+        if (ocr.totalChars >= TEXT_MIN_CHARS) {
+          const ocrParsed = parseSdsText(ocr.pages);
+          // Prefer whichever local result scored higher.
+          if (!parsedFields || scoreParse(ocrParsed) > scoreParse(parsedFields)) {
+            parsedFields = ocrParsed;
+            method = "ocr";
+          }
+        }
+      } catch (err) {
+        // OCR engine failure (first-run language download blocked, etc.) —
+        // remember why so the final response/notice can explain it, then fall
+        // through to the AI tier below.
+        const msg = `Local OCR unavailable: ${
+          err instanceof Error ? err.message : String(err)
+        }`;
+        console.error("[extract]", msg);
+        ocrNotice = msg;
+      }
+      if (parsedFields && method === "ocr") {
+        console.log(
+          `[extract] OCR tier scored ${scoreParse(parsedFields)}/5`
+        );
+      }
+    }
   }
 
-  if (!rawResponse) {
-    return NextResponse.json(
-      { success: false, error: "AI returned an empty response." },
-      { status: 502 }
-    );
+  const localScore = parsedFields ? scoreParse(parsedFields) : -1;
+
+  // ---------------------------------------------------------------------------
+  // TIER 3: vision AI — automatic fallback when local parsing was weak, or
+  // forced via the admin's "Retry with AI" button.
+  // ---------------------------------------------------------------------------
+  let aiError: string | null = null;
+
+  if (!parsedFields || localScore < PARSE_MIN_SCORE) {
+    try {
+      assertProviderConfigured(provider);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // If we have ANY usable local data, prefer it over failing hard.
+      if (!(parsedFields && localScore >= 1)) {
+        return NextResponse.json({ success: false, error: msg }, { status: 503 });
+      }
+      aiError = msg;
+    }
+
+    if (!aiError) {
+      let rawResponse = "";
+      try {
+        const pageImages = await getPageImages();
+        if (pageImages.length === 0) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                "PDF rasterization produced no images. The PDF may be empty or corrupted.",
+            },
+            { status: 500 }
+          );
+        }
+        const result = await callVlm(pageImages, EXTRACTION_PROMPT);
+        rawResponse = result.text;
+      } catch (err) {
+        if (err instanceof AiConfigError) {
+          aiError = err.message;
+        } else if (err instanceof AiRequestError) {
+          aiError = err.message;
+        } else {
+          aiError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
+      if (!aiError) {
+        if (!rawResponse) {
+          aiError = "AI returned an empty response.";
+        } else {
+          // Parse + validate the VLM JSON.
+          try {
+            const jsonStr = extractJson(rawResponse);
+            const obj = JSON.parse(jsonStr) as Record<string, unknown>;
+            if (
+              typeof obj !== "object" ||
+              obj === null ||
+              Array.isArray(obj)
+            ) {
+              throw new Error("not an object");
+            }
+            const data = sanitizeFields(obj);
+            return NextResponse.json({
+              success: true,
+              data,
+              method: "ai",
+              // If OCR ran but failed before this, tell the admin why the AI
+              // tier was used (e.g. first-run language data download failed).
+              ...(ocrNotice ? { notice: ocrNotice } : {}),
+            });
+          } catch {
+            aiError = "AI response was not valid JSON.";
+          }
+        }
+      }
+
+      // AI failed but we hold a weak-but-nonempty local result — use it rather
+      // than returning nothing, and surface what happened via `notice`.
+      if (!(parsedFields && localScore >= 1)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: aiError ?? "Extraction failed.",
+          },
+          { status: 502 }
+        );
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // Parse + sanitize the VLM output.
+  // Local-path response — sanitize through the same field normalizer used for
+  // AI output so both pipelines return identical shapes/enums.
   // ---------------------------------------------------------------------------
-  let parsed: unknown = null;
-  try {
-    const jsonStr = extractJson(rawResponse);
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "AI response was not valid JSON.",
-      },
-      { status: 502 }
-    );
-  }
+  const fields = parsedFields as NonNullable<typeof parsedFields>;
+  const data = sanitizeFields({
+    chemicalName: fields.chemicalName,
+    casNumber: fields.casNumber,
+    formula: fields.formula,
+    tradeName: fields.tradeName,
+    manufacturer: fields.manufacturer,
+    supplier: fields.supplier,
+    signalWord: fields.signalWord || undefined,
+    ghsPictograms: fields.ghsPictograms,
+    hazardClasses: fields.hazardClasses,
+    storageLocation: fields.storageLocation,
+    safetyInstructions: fields.safetyInstructions,
+    emergencyContact: fields.emergencyContact,
+    personalProtectiveEquipment: fields.personalProtectiveEquipment,
+    firstAidMeasures: fields.firstAidMeasures,
+    firefightingMeasures: fields.firefightingMeasures,
+    accidentalReleaseMeasures: fields.accidentalReleaseMeasures,
+  });
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "AI response was not a JSON object.",
-      },
-      { status: 502 }
-    );
-  }
+  const notice =
+    [ocrNotice, aiError].filter(Boolean).join(" · ") || undefined;
 
-  const obj = parsed as Record<string, unknown>;
+  return NextResponse.json({
+    success: true,
+    data,
+    method,
+    ...(notice ? { notice } : {}),
+  });
+}
 
-  // Sanitize signalWord — default to "danger" if invalid.
+// ---------------------------------------------------------------------------
+// Shared field sanitizer — normalizes BOTH AI JSON and local-parse output into
+// the identical response shape (trimmed strings, valid enum arrays).
+// ---------------------------------------------------------------------------
+function sanitizeFields(obj: Record<string, unknown>) {
+  // Sanitize signalWord — default to "danger" if invalid/absent.
   const rawSignal = asString(obj.signalWord).toLowerCase();
   const signalWord: "danger" | "warning" = VALID_SIGNAL_WORDS.has(rawSignal as "danger" | "warning")
     ? (rawSignal as "danger" | "warning")
     : "danger";
 
   // Sanitize pictograms + hazard classes against enum sets.
-  const rawPictograms = asStringArray(obj.ghsPictograms);
-  const ghsPictograms = filterValid(rawPictograms, VALID_GHS_PICTOGRAMS);
+  const ghsPictograms = filterValid(asStringArray(obj.ghsPictograms), VALID_GHS_PICTOGRAMS);
+  const hazardClasses = filterValid(asStringArray(obj.hazardClasses), VALID_HAZARD_CLASSES);
 
-  const rawHazardClasses = asStringArray(obj.hazardClasses);
-  const hazardClasses = filterValid(rawHazardClasses, VALID_HAZARD_CLASSES);
-
-  const data = {
+  return {
     chemicalName: asString(obj.chemicalName),
     casNumber: asString(obj.casNumber),
     formula: asString(obj.formula),
@@ -413,6 +545,4 @@ export async function POST(request: Request) {
     firefightingMeasures: asString(obj.firefightingMeasures),
     accidentalReleaseMeasures: asString(obj.accidentalReleaseMeasures),
   };
-
-  return NextResponse.json({ success: true, data });
 }

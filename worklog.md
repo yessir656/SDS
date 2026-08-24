@@ -709,3 +709,140 @@ Stage Summary:
 - Q2 ANSWERED: An already-open app works fully offline (catalog/search/detail/emergency/PDFs all read IndexedDB). A fresh offline page load requires a production build (SW app-shell cache) — dev mode cannot by design; production verification is the top open item.
 - Full handoff log written to OFFLINE-TEST-LOG.md (architecture, tests, evidence, re-run steps, open items).
 - Dev server left running on http://localhost:3000; database intact (1 SUPER_ADMIN, 14 chemicals, 14 SDS).
+
+---
+Task ID: EXTRACT-TIERS-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User asked "in my admin side i insert an gemini ai for extraction in the pdf file that i send right? but ai has a limit so what if i add an ocr option?" — then approved the recommended design: automatic free-first extraction pipeline (embedded text → OCR → AI as automatic fallback), method badge, and Retry-with-AI escape hatch.
+
+Work Log:
+- Analyzed existing flow first: POST /api/admin/sds/extract always rasterized 5 pages → sent ALL page images to Gemini vision → parsed JSON. Every upload burned quota even for trivially-digital PDFs.
+- Key insight implemented: ~90% of SDS PDFs are digitally generated with an embedded text layer that pdfjs-dist (already a dependency) reads instantly and MORE accurately than vision AI (exact characters vs pixel interpretation). True OCR is only needed for scanned documents.
+- Installed tesseract.js@7.0.0 (pure WASM, no system deps, works on Windows). Blocked postinstall is only opencollective-postinstall (donation prompt) — safe to skip via bun's trusted-dependency policy.
+- Created src/lib/pdf-text.ts — Tier 1: extractPdfText(buffer, maxPages=5) using pdfjs-dist getTextContent() with hasEOL-aware line reconstruction. Returns per-page text + totalChars used by the scanned-document heuristic.
+- Created src/lib/ocr.ts — Tier 2: ocrPngBuffers(pngs) running Tesseract.js locally over rasterized PNG pages. Dynamic import keeps it out of the initial route bundle. Language data caches in os tmpdir sds-chem-tessdata (first-ever run downloads ~10-15MB eng data from CDN; afterwards fully offline).
+- Created src/lib/sds-local-parse.ts — deterministic GHS heuristics parser producing the SAME field shape as the AI path:
+  * Section detection via numbered-header regex (handles "SECTION 4", "4.", "4 -" forms); sections 1/2/3/4/5/6/7/8/9/16 located and spanned.
+  * chemicalName/tradeName/manufacturer/supplier/emergencyContact from labeled lines (Product Name:, Trade name:, Manufacturer:, Emergency telephone:) + phone-pattern fallback.
+  * signalWord from standalone DANGER/WARNING tokens (uppercase preferred).
+  * ghsPictograms via GHS01-09 codes AND pictogram-name phrases ("Flame over circle", "Exclamation mark", …).
+  * hazardClasses via H-statement code ranges mapped to our 13-class enum (H200-205 explosive, H220-228+250-252 flammable, H270-273 oxidizing, H280-284 compressed-gas, H290/H314/H318 corrosive, acute-tox splits toxic/harmful, H315/319/335 irritant, H317/334 sensitizer, H350/351 carcinogen, H360/361 reproductive-toxicant, H370-373+H304+H336 STOT, H400+ aquatic environment), with keyword fallback when a document lists no H-codes.
+  * PPE sentence extraction from Section 8 by gear-keyword matching (goggles/gloves/lab coat/respirator/…), deduped, capped at 8 items.
+  * Sections 4/5/6 become the three emergency textarea fields (header line stripped, capped 1600 chars); Section 7 split into storageLocation (labeled Storage: preferred) + safetyInstructions.
+  * scoreParse() grades a parse 0-5 (name/CAS/emergency-sections/PPE/hazards) — drives the automatic AI-fallback gate.
+- Rewrote POST /api/admin/sds/extract as the tiered pipeline:
+  * forceAI form field ("true"/"1") skips straight to vision AI (Retry-with-AI button).
+  * Tier 1 embedded text (threshold ≥200 chars) → parse; if score <2 → Tier 2 OCR over rasterized pages → keep whichever local parse scored higher.
+  * Tier 3 vision AI fires automatically only when no local result reached score ≥2; if AI then fails but ANY weak local data exists (score ≥1), returns the local result with a `notice` instead of erroring hard. Provider config is checked lazily — missing/misconfigured key no longer blocks the free tiers (fail-fast check moved into tier 3 only).
+  * Response now includes `method` ∈ "embedded-text" | "ocr" | "ai" (+ optional `notice`). Both pipelines sanitize through one shared sanitizeFields() so shapes are identical. maxDuration raised 60→120s (OCR of 5 pages + possible first-run language download).
+- Frontend (src/components/admin/chemical-manager.tsx):
+  * handleAutoFill refactored onto runExtraction(file, forceAI); selected file kept in lastFileRef for retries.
+  * Loading message now reflects the actual mode ("Extracting locally…" vs "Asking Gemini AI…").
+  * Review banner gained a color-coded method badge: green "Embedded text · free & offline" / green "Local OCR · free & offline" / violet "Gemini AI", plus an optional amber notice line.
+  * Added "Retry with AI" button on non-AI results — one click re-runs the same file through Gemini (escape hatch for mangled scans).
+  * Button hint copy updated to explain the free-first behavior.
+- Bug fixes caught by the unit harness during development: H336 was unmapped (added → specific-target-organ-toxicity); storage regex grabbed the Handling line when Section 7 header contained the word STORAGE (now prefers labeled "Storage:"); double stripHeader() was eating each section's first content line (Eye contact / Suitable extinguishing media / Eliminate ignition sources).
+
+Testing:
+- Unit harness (bun script, since removed): generated a realistic 2-page DIGITAL SDS PDF (handcrafted PDF bytes, Helvetica, GHS layout, Acetone-style content) and verified:
+  * Tier 1: extraction produced >1000 chars; parser scored 5/5; 18 field assertions ALL PASS (name/CAS/formula/danger/pictograms incl. exclamation-mark/hazards incl. STOT/manufacturer/supplier/contact/PPE×2/sections 4·5·6/storage).
+  * Tier 2: rasterized both pages and ran real Tesseract OCR — completed in ~2.3s/page-ish (1627 chars recognized), correctly read 'Acetone' and CAS '67-64-1'. PASS.
+- E2E on temporary dev server at http://localhost:3100 (NOT 3000 — user explicitly reserved port 3000):
+  * Safety net: server started with AI_PROVIDER=openai + empty OPENAI_API_KEY so any accidental AI fallback would return 503 instead of spending the user's real Gemini quota.
+  * Logged in as admin@mirdc.dost.gov.ph (curl CSRF→credentials→302) → POST multipart _test-sds.pdf to /api/admin/sds/extract → success:true, method:"embedded-text" (AI never attempted — safety net never tripped), casNumber 67-64-1, formula C3H6O, danger, [flame, exclamation-mark], [flammable, irritant, specific-target-organ-toxicity], 3 PPE items, 191-char first aid. EXIT 0.
+  * Unauth POST extract → 401 (auth gate intact).
+- Typecheck: zero errors in all new/modified files (remaining tsc output is pre-existing: examples/ socket.io, archived upload/ copy, known trustHost runtime-only option). ESLint clean on all 5 changed files.
+- Cleanup: temp 3100 server stopped, test artifacts (_test-sds.pdf, _test-extract.ts, cookies, log) deleted, port 3000 confirmed untouched and free per user request.
+
+Stage Summary:
+- Auto-fill now spends ZERO Gemini quota for digital PDFs (~90% of uploads) and unlimited-free local OCR for scans; vision AI runs only as automatic fallback for genuinely hard documents or on explicit Retry-with-AI.
+- The admin sees exactly what happened via the method badge and can force AI anytime — no decisions required on routine uploads.
+- Files created (3): src/lib/pdf-text.ts, src/lib/ocr.ts, src/lib/sds-local-parse.ts.
+- Files modified (2): src/app/api/admin/sds/extract/route.ts (tiered pipeline + method/notice + shared sanitizer), src/components/admin/chemical-manager.tsx (method badge, notice line, Retry-with-AI, mode-aware loading text, updated copy).
+- New dependency: tesseract.js@7.0.0.
+- Note for future sessions: first-ever OCR run needs internet once to fetch eng.traineddata (cached in %TMP%/sds-chem-tessdata); AI fallback still uses the vision endpoint (text-only Gemini calls would be a further cost optimization, not needed for current quotas).
+
+---
+Task ID: DATA-WIPE-SEEDS-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User: "what we need to next is to delete those fake data cuz i need to insert real data" — remove all 14 seed chemicals + placeholder SDS documents/files while keeping the admin account, in preparation for real DOST-MIRDC inventory entry.
+
+Work Log:
+- Pre-deletion safety inspection via Prisma: confirmed all 14 chemical rows were exactly the known seed ids (chem-acetic-acid … chem-toluene), none soft-deleted; 14 SdsDocument rows; 1 SUPER_ADMIN user; 1 auditLog entry.
+- Deletion strategy — SOFT-DELETE, not hard delete: set `deletedAt` + bumped `updatedAt` on all 14 chemicals. Reason: the public PWA's sync engine only learns about removals via `/api/sync`'s `deletedChemicalIds` (queried as `deletedAt > since`). Hard-deleting rows would leave every already-synced device stuck with 14 fake chemicals (and their cached PDF blobs) in IndexedDB forever. Tombstones guarantee automatic cleanup on each device's next online sync (client sync engine removes the chemical, its sdsDocuments row AND its sdsBlobs PDF blob — see src/lib/sync-engine.ts step 3).
+- Deleted all 14 SdsDocument rows outright (deleteMany) — server-side rows serve no purpose once tombstones exist; client blobs are cleared via the chemical deletion path.
+- Wiped ALL 28 PDFs in storage/sds/ — both the 14 referenced placeholders and the 14 orphaned files left by an earlier seed run (open item inherited from OFFLINE-TEST-LOG.md §5.2 — now resolved).
+- Kept intact (verified): admin@mirdc.dost.gov.ph SUPER_ADMIN account, and the single audit-log entry (user's own genuine system.test-ai "Tested AI provider gemini → OK" from Aug 17 — legitimate history, audit logs are append-only).
+- Post-state verification: active chemicals = 0, tombstones = 14, sdsDocuments = 0, users = 1; simulated sync query confirms /api/sync will report exactly 14 deletedChemicalIds to clients.
+
+Stage Summary:
+- Database catalog is empty and ready for real data entry via Admin → Chemicals → Add Chemical (auto-fill pipeline from EXTRACT-TIERS-1 works on the new uploads; placeholder SDS is generated per new chemical automatically on create).
+- Any device that previously synced the seeds will self-clean on next sync while online — no manual cache clearing needed.
+- CAUTION recorded for future sessions: do NOT run `bun run db:seed` again expecting a clean slate — it upserts the same 14 chem-* ids; the update branch does NOT clear `deletedAt`, so they would stay invisible tombstones (no visible resurrection), but the rows and placeholder PDF writes would return. If a re-seed is ever wanted intentionally, first clear tombstones (`prisma.chemical.deleteMany({})`) then seed.
+- storage/sds/ is now an empty directory; new uploads will land there fresh.
+
+---
+Task ID: ADMIN-LIST-FILTER-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User reported fake data still visible "under the chemicals" on the admin side after DATA-WIPE-SEEDS-1.
+
+Work Log:
+- Root cause: GET /api/admin/chemicals deliberately listed ALL rows including soft-deleted tombstones (header comment said "list ALL chemicals (including deleted)"). After the wipe's 14 tombstones existed, the admin Chemicals tab AND the SDS Documents tab (which lists from the same endpoint — sds-manager.tsx fetches /api/admin/chemicals) still showed all 14 seed rows. The Overview tab was already correct (dashboard route filters deletedAt: null).
+- Fix: added `where: { deletedAt: null }` to the admin chemicals GET findMany; updated header comment to document that tombstones exist only for /api/sync deletion propagation.
+- Verified live against the running server (curl admin session): GET /api/admin/chemicals → 0 chemicals; GET /api/admin/dashboard → totalChemicals 0, totalSds 0. ESLint clean.
+- Note kept for future work: POST /api/admin/chemicals rejects a create if ANY row (including tombstones) uses the same id (409). Real inventory ids won't collide with the chem-* seeds, but if a re-create over an old id is ever wanted, the guard would need a deletedAt-aware branch.
+
+Stage Summary:
+- Admin Chemicals + SDS Documents tabs now show only active chemicals; the 14 seed tombstones are fully invisible in the UI while remaining available for device-cache cleanup propagation.
+- Admin side confirmed empty and ready for real data entry.
+
+---
+Task ID: EXTRACT-REALPDF-FIX-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User uploaded a REAL scanned SDS ("SDS_Solid Ammonium iron (II) sulfate hexahydrate.pdf", Fisher Scientific, 3.83 MB, 7 pages, image-only) saying "try to extract this pdf file the extraction shouldnt be that long broski". The extraction request HUNG (>115s timeout).
+
+Work Log:
+- Diagnosis (stage-by-stage bun harness against the real file): Tier 1 embedded text = 0 chars (confirmed scanned/image-only PDF); rasterization = ~4s for 3 pages; Tesseract OCR itself = ~3s/page with EXCELLENT recognition ("Product Name Ammonium iron (ll) sulfate hexahydrate", "CAS-No 7783-85-9"). So every pipeline stage was individually fast — the hang was specific to running tesseract.js INSIDE the Next dev server.
+- Root cause of hang: Turbopack BUNDLES tesseract.js despite the dynamic import; its internal worker-thread spawn + WASM loading resolves paths relative to node_modules at runtime, and bundling breaks those lookups → request hangs forever.
+- Fix 1 (next.config.ts): added "tesseract.js" to serverExternalPackages (same mechanism already used for @napi-rs/canvas / pdfjs-dist / @google/generative-ai) so Node requires it natively from node_modules. Hang eliminated — same request now completes.
+- Discovery after un-hang: the route returned method:"ai" — OCR ran but its parse scored <2 so the AI fallback fired, burning quota unnecessarily on a document OCR reads fine.
+- Root cause: real-world OCR text broke parser assumptions — Fisher labels have NO colon ("Product Name Ammonium iron…"), section titles can be lowercase/mangled ("1. identification"), so labeled-field regexes required colons and generic numbered-header matching found no sections → no name/CAS/PPE → low score.
+- Fix 2 (sds-local-parse.ts): replaced generic numbered-header section finder with canonical GHS TITLE keyword patterns (IDENTIFICATION / HAZARDS IDENTIFICATION / COMPOSITION…INGREDIENTS / FIRST AID / FIRE FIGHTING / ACCIDENTAL RELEASE / HANDLING AND STORAGE / EXPOSURE CONTROLS / PHYSICAL PROPERTIES / STABILITY AND REACTIVITY / TOXICOLOGICAL / ECOLOGICAL / DISPOSAL / TRANSPORT INFORMATION / REGULATORY INFORMATION / OTHER INFORMATION), case-insensitive, punctuation-tolerant. Made all label separators optional ("Product Name X" matches). CAS lookup gained whole-document fallback (format is distinctive enough). Hazard/pictogram scope when Section 2 is unrecognized is now bounded to first ~2500 chars instead of the whole document — scanning everything imported other products' H-codes from Sections 3/11 as false positives (was returning explosive/carcinogen/etc. for a simple iron-sulfate salt). Emergency-contact added CHEMTREC + 24-hour-emergency patterns (Fisher/Sigma vendor formats).
+- Fix 3 (ocr.ts): pages now recognized by a PARALLEL worker pool (up to 4 workers, round-robin chunking, all terminated via Promise.allSettled). 5-page scans drop ~15-20s sequential → ~5-8s wall time.
+- Fix 4 (route): OCR failures are now console.error-logged, OCR tier score logged, and ocrNotice propagates onto the AI-success response too (previously an OCR failure followed by successful AI fallback silently dropped the explanation).
+- Regression: synthetic digital-PDF unit harness re-run after parser rework → ALL PASS (17 checks incl. Eye-contact line retention, storage split, H336→STOT).
+- Verification against the real Fisher PDF (server on :3000): method="ocr" (zero Gemini quota), total time 14-15s end-to-end (from ∞ hang → 31s-via-AI → 14s free), extracted: name "Ammonium iron (ll) sulfate hexahydrate", CAS 7783-85-9 ✓, signal warning ✓, manufacturer Fisher Scientific ✓, emergency 800-424-9300 (CHEMTREC) ✓, PPE items, sections 4/5/6 text. Known OCR limits documented: "(II)" read as "(ll)", molecular formula subscripts garbled — inherent to raster OCR; admin reviews/edits in the form, or clicks Retry-with-AI which previously produced a fully clean extraction for this exact document.
+- ESLint clean on all touched files; test artifacts removed.
+
+Stage Summary:
+- Real-world scanned SDS extracts FREE via local OCR in ~14s with correct identity/CAS/contact fields; AI fallback now reserved for genuinely weak parses (and reports why it fired via notice).
+- Files modified: next.config.ts (+tesseract.js external), src/lib/sds-local-parse.ts (title-keyword sections, colonless labels, bounded hazard scope, CHEMTREC contact), src/lib/ocr.ts (parallel worker pool + explanatory comments), src/app/api/admin/sds/extract/route.ts (OCR logging + notice propagation).
+- Performance expectation for admins: digital PDF ≈ instant; 5-page scan ≈ 15s free; Retry-with-AI adds ~10-20s + quota.
+
+---
+Task ID: BULK-IMPORT-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User: "okay one last part can we create an bulk sds pdf extraction?" — batch ingestion of multiple SDS PDF files into the catalog.
+
+Work Log:
+- Design decision: NO new server route needed. Bulk reuses the three existing audited admin endpoints per file, orchestrated client-side sequentially so progress streams naturally to the UI: (1) POST /api/admin/sds/extract (tiered free-first pipeline from EXTRACT-TIERS-1), (2) POST /api/admin/chemicals (create record), (3) POST /api/admin/sds multipart upload (attaches the ACTUAL uploaded PDF as the chemical's SDS document — status becomes "available", replacing the generated placeholder; audit-logged as sds.upload).
+- Created src/components/admin/bulk-import.tsx (BulkImportDialog):
+  * Multi-file PDF picker + a single Department select applied to all imports (PDFs don't carry division info; admin can reassign per chemical afterwards via Edit).
+  * Preloads existing CAS numbers when opened; a file whose extracted CAS already exists in the catalog is SKIPPED as "duplicate" instead of creating a second copy.
+  * Auto-generates schema-valid ids by slugifying the extracted chemical name (lowercase [a-z0-9-], ≤90 chars); on id collision (409) retries with -2…-5 suffixes.
+  * Missing-field fallbacks to pass createChemicalSchema: casNumber/formula → "Not provided" when OCR found neither; signalWord defaults danger.
+  * Per-file live status rows (Queued/Extracting/Creating/Imported/Imported-partial/Skipped-duplicate/Failed + method badge + generated id + error detail); one bad PDF never aborts the batch.
+  * Final summary line (N imported, N skipped, N failed) + parent table refresh via onImported callback.
+- Wired into ChemicalManager toolbar: new "Bulk Import" outline button (Files icon) beside "Add Chemical".
+- Testing (E2E harness against live :3000, exact client pipeline replicated via fetch):
+  * Generated two distinct synthetic SDS PDFs (Sodium Chloride CAS 7647-14-5 warning; Potassium Perchlorate CAS 7778-74-7 danger/oxidizer) → both extracted (method embedded-text), created with correct names/CAS, REAL PDFs attached (sds.status=available). ALL PASS.
+  * Duplicate path verified: re-extracting an existing CAS yields membership in the preloaded set ⇒ dialog would skip creation.
+  * Cleanup performed: the two test rows soft-deleted, their SdsDocument rows removed, their uploaded PDF files unlinked from storage/sds/. Verified catalog returned to its prior state exactly.
+  * Harness gotcha recorded: node fetch must use redirect:"manual" on the NextAuth credentials callback or the session cookie set on the 302 is lost (first run failed 401 on extract).
+- IMPORTANT: user had ALREADY imported their first real chemical themselves while I worked — `ammonium-iron-ii` (Ammonium iron (II) sulfate hexahydrate, CAS 7783-85-9, added ~09:50 via the UI, name shows properly corrected "(II)"). Test cleanup explicitly preserved it; catalog now holds exactly that one real entry.
+- ESLint clean; tsc clean for bulk-import.tsx + chemical-manager.tsx; E2E artifacts removed.
+
+Stage Summary:
+- Admin → Chemicals now has a "Bulk Import" dialog: pick many SDS PDFs, choose one department, hit Import — each file is read free-first (text/OCR), auto-created with a slug id, and its actual PDF becomes the attached SDS document. Duplicates by CAS are skipped automatically.
+- Files created (1): src/components/admin/bulk-import.tsx. Modified (1): src/components/admin/chemical-manager.tsx (button + state + dialog mount).
+- Recommended workflow for the lab: drop a folder's PDFs into Bulk Import → spot-fix OCR quirks via Edit → reassign departments as needed.
