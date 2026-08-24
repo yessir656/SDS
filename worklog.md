@@ -642,3 +642,70 @@ Stage Summary:
 - All 3 user-facing docs (README, ADMIN_GUIDE, DEVELOPER_GUIDE) now accurately reflect the current codebase state: navy blue DOST-MIRDC branding, pagination, Phase E security fixes, trustHost auth, regenerated PWA icons.
 - The worklog (this file) already contains detailed entries for every task: UI-REDESIGN-1 (navy rebrand), PAGINATION-1 (pagination), FAVICON-1 (PWA icons), and now DOCS-UPDATE-1.
 - The project is ready for the user to transfer to their local PC — the docs won't mislead them about env vars, colors, security model, or features.
+
+---
+Task ID: LOCAL-LOGIN-FIX-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: Fix admin login on the user's local Windows machine — "i cant login my admin account". First session running on the transferred local environment (C:\Users\jtvillegas\Desktop\sds other version\sdsv5, Git Bash shell, Windows x64) instead of the original Linux sandbox.
+
+Work Log:
+- Environment change confirmed: all prior worklog entries ran in the Linux sandbox (/home/z/my-project). The project has been transferred to the user's local Windows PC. Paths, shell (Git Bash), and process management all differ.
+- Root cause of login failure: `db/custom.db` existed (159 KB) but contained ZERO tables — `SELECT name FROM sqlite_master WHERE type='table'` returned []. The Prisma schema was never pushed to the local database (the file that synced over was an empty/placeholder SQLite). With no User table, `authorize()` in src/lib/auth.ts found no user → every login returned "Invalid email or password".
+- Note on the two DB files: `db/custom.db` (root, the real one per .env DATABASE_URL=file:./db/custom.db resolved from project root) vs `prisma/db/custom.db` (0 bytes, unused placeholder). All work targets `db/custom.db`.
+- Fix step 1: `bun run db:push` — created all 4 tables (User, Chemical, SdsDocument, AuditLog). Schema push succeeded but the chained `prisma generate` failed with `EPERM: operation not permitted, rename ...query_engine-windows.dll.node.tmp...` — the query engine DLL was locked by the RUNNING dev server (Windows file-locking; this did not happen on Linux).
+- Fix step 2: `bun run scripts/seed-db.ts` — seeded admin user (email=admin@mirdc.dost.gov.ph from .env ADMIN_EMAIL, password=BakalBoi from .env ADMIN_PASSWORD, bcrypt 12 rounds, role=SUPER_ADMIN) + 14 chemicals + 14 placeholder SDS PDFs in storage/sds/. Verified password hash with bcrypt.compare → true.
+- Fix step 3 (stale server): login still failed live with `CredentialsSignin` because the running dev server (a Node.exe PID 20788 on :3000 — NOT the PID in .zscripts/dev.pid, which was stale) held the broken pre-generate Prisma Client. Git Bash `kill`/`kill -9` and `taskkill /F` could not stop it; `powershell Stop-Process -Id 20788 -Force` worked. NOTE for future Windows sessions: use PowerShell Stop-Process for process management here.
+- Fix step 4: re-ran `npx prisma generate` with the server stopped → succeeded (cleaned 3 orphaned query_engine .tmp files first). Restarted dev server with `bun run dev` (nohup background).
+- End-to-end verification (curl, all passed): GET /api/auth/csrf → 200 + cookie jar → POST /api/auth/callback/credentials (csrfToken + admin@mirdc.dost.gov.ph / BakalBoi) → 302 to `/` (success; a failed login 302s to /api/auth/error?error=CredentialsSignin) → `next-auth.session-token` cookie set → GET /api/auth/session returns `{"user":{"email":"admin@mirdc.dost.gov.ph","role":"SUPER_ADMIN","passwordChangeRequired":false}}`.
+- Working credentials: admin@mirdc.dost.gov.ph / BakalBoi (source: .env, seeded by script).
+
+Stage Summary:
+- Admin login fixed on the local Windows environment. Root cause was an empty local database (schema never pushed after transfer), compounded by a locked Prisma query engine and a stale dev-server process.
+- Database state: 1 SUPER_ADMIN + 14 chemicals + 14 placeholder SDS PDFs.
+- Windows-specific lessons recorded: (1) Prisma generate fails with EPERM while the dev server runs — stop it first; (2) use PowerShell Stop-Process, not bash kill/taskkill; (3) /tmp paths in Git Bash are not readable by Node.js (use project-relative temp files).
+- Dev server running on http://localhost:3000.
+
+---
+Task ID: ICON-FIX-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: "can we change the icon of app or the logo when its download it will show the mirdc logo when i download it" — make the PWA install/download icon show the real DOST-MIRDC logo. User instruction: read the MD files first so nothing is hallucinated.
+
+Work Log:
+- Read the MD docs first per user instruction (README, DEVELOPER_GUIDE, ADMIN_GUIDE, aug12-meeting, prior worklog entries FAVICON-1 / UI-REDESIGN-1) plus the actual source files (layout.tsx, manifest.json, generate-icons.mjs, icon.svg).
+- Found a real discrepancy FAVICON-1 could not have caught from docs alone: binary comparison showed `public/icons/icon.svg` embedded a base64 PNG whose bytes did NOT match `public/dost-mirdc-logo.png` (74,064 vs 118,264 base64 chars), and pixel-color analysis of the embedded 512×512 image did not match the official logo's profile. So the SVG-source icon pipeline was NOT using the official logo.
+- Also found `scripts/generate-icons.mjs` still had the pre-rebrand teal THEME_COLOR (#0d9488) in code+comments (docs/manifest already navy #0a2540), and it did not generate icon-16.png / icon-32.png even though src/app/layout.tsx metadata.icons references them.
+- Rewrote `public/icons/icon.svg`: resized the official dost-mirdc-logo.png to 512×512 with sharp and embedded it as the base64 PNG (verified: extracted base64 now equals the resized logo bytes).
+- Fixed `scripts/generate-icons.mjs`: THEME_COLOR #0d9488 → #0a2540 (matches manifest theme_color + CSS --color-navy-900); SIZES now [16, 32, 192, 512]; maskable icons generated only for 192/512 (favicons don't need them); comments updated (teal→navy, shield/flask→MIRDC logo, safe-zone wording).
+- Regenerated all 6 PNGs via `bun run scripts/generate-icons.mjs`: icon-16/32/192/512.png (transparent, logo) + icon-maskable-192/512.png (navy background, logo at 80% safe zone).
+- Pixel verification: icon-512.png contains the logo's red/black/white pixel profile (1,123 red px); icon-maskable-512.png top-left pixel = [10, 37, 64, 255] — EXACTLY navy #0a2540; 100% opaque background as maskable spec requires.
+- Updated `public/sw.js` PRECACHE_URLS to also precache /icons/icon-16.png and /icons/icon-32.png (were missing; install-fallback fetch tolerates misses but precache is correct).
+- No changes needed to public/manifest.json (already correct from FAVICON-1) or src/app/layout.tsx metadata.
+
+Stage Summary:
+- PWA install icon now provably shows the official DOST-MIRDC logo: the SVG source embeds the real logo bytes, and all 6 PNGs are regenerated from it through the (now-fixed) sharp pipeline.
+- generate-icons.mjs is now the single reproducible icon pipeline on Windows (FAVICON-1 used one-off Python PIL in the sandbox; this script can be re-run anytime with `bun run scripts/generate-icons.mjs`).
+- Users who already installed the PWA will see the new icon after the SW updates / the app is re-installed (platform icon cache).
+- Files modified: public/icons/icon.svg, scripts/generate-icons.mjs, public/sw.js, all 6 public/icons/icon-*.png regenerated.
+
+---
+Task ID: OFFLINE-TEST-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User asked two questions and a test: (1) are SDS PDF files accessible with no WiFi, (2) test that the system works with no WiFi, (3) take a log so the next AI handling the system is informed.
+
+Work Log:
+- Read the offline architecture end-to-end before testing (no hallucination): src/lib/sync-engine.ts (syncNow + syncSdsBlobs + getSdsBlobForChemical fallback), src/lib/local-db.ts (Dexie tables incl. sdsBlobs), src/lib/storage.ts (server-side storage/sds/), src/app/api/sds/[id]/download/route.ts (Cache-Control: no-store, ETag), src/app/api/sync/route.ts (delta sync), src/components/detail/chemical-detail.tsx (handleViewSds → window.open(blob) / alert on null), src/hooks/use-sync.ts + use-online-status.ts (navigator.onLine + online/offline events), src/components/common/service-worker-register.tsx (SW registered in PRODUCTION ONLY).
+- Key architecture fact: offline PDF access does NOT depend on the service worker — it depends on the Dexie IndexedDB `sdsBlobs` cache, filled by every successful sync (startup, offline→online transition, every 5 min while online).
+- API verification: GET /api/sync?since=0 → 200 with 14 chemicals + 14 sdsDocuments; GET /api/sds/cmswmv8tv0002u9xg12wjzron/download → 200, application/pdf, 1,068 bytes, %PDF-1.4 magic bytes. storage/sds/ has 28 files (14 current + 14 orphans from an earlier seed run — noted as cleanup item).
+- Browser test (ZCode in-app browser): loaded http://localhost:3000 → "Loading chemical database…" → full catalog with header "Synced 08:51 AM" + "Online", 14 chemical cards, dashboard stats. This sync downloaded all 14 PDF blobs into IndexedDB.
+- Online PDF view: navigated to Acetone detail (SDS cmswmv8tv0002u9xg12wjzron, Placeholder v1) → clicked "View SDS PDF" → PDF fetched from server, cached to IndexedDB, window.open fired (tab navigated to the blob PDF).
+- OFFLINE TEST (the key one): killed the dev server via PowerShell Stop-Process (netstat confirmed no LISTENING on :3000, only SYN_SENT entries = connection-refused, exactly what no-WiFi looks like) → clicked "View SDS PDF" on the already-loaded Acetone page → code path: navigator.onLine still true (browsers always consider localhost online) → fetch fails → catch → IndexedDB fallback → blob returned → window.open fired. EVIDENCE: tab navigated away exactly like the online test AND `getJsDialog()` on every tab returned none — the "SDS document is not available offline" alert only fires when the blob is null, so the blob MUST have come from the IndexedDB cache. PASS: PDFs ARE accessible with no WiFi (after at least one successful online sync).
+- Dev-mode limitation found and explained: reloading the page with the server down yields an empty page because the service worker is intentionally production-only (service-worker-register.tsx returns early unless NODE_ENV === "production") and Turbopack dev chunks are never SW-cached. Full offline reload is expected to work in a production build (bun run build && bun run start / next-service-dist) — NOT yet end-to-end verified; flagged for next handler.
+- Browser automation lessons recorded for future agents: (1) Playwright role-based .click() times out on this app's chemical cards in the IAB — use read-only evaluate() bounding-box lookup + tab.cua.click({x,y}); (2) window.open(blob:) in the IAB navigates the current tab to an uncapturable "guest" context (screenshot fails, DOM empty) — judge success by tab navigation + absence of the failure alert, not by screenshot; (3) async IndexedDB reads via evaluate() are rejected as possible side effects — don't retry.
+- Wrote comprehensive OFFLINE-TEST-LOG.md at project root: full architecture diagram, tests A–F with evidence, answers to the user's questions, re-run instructions, and open items for the next AI (production offline reload test, orphaned PDF cleanup, offline-ready UI indicator, credentials reminder).
+- Restarted the dev server after testing (bun run dev, nohup) — /api/sync returns 200; system left healthy.
+
+Stage Summary:
+- Q1 ANSWERED: YES — SDS PDFs are accessible offline. Verified live: with the server killed, View SDS PDF served the PDF from the IndexedDB cache (no failure alert). Requirement: the device must have synced online at least once (first launch must be online).
+- Q2 ANSWERED: An already-open app works fully offline (catalog/search/detail/emergency/PDFs all read IndexedDB). A fresh offline page load requires a production build (SW app-shell cache) — dev mode cannot by design; production verification is the top open item.
+- Full handoff log written to OFFLINE-TEST-LOG.md (architecture, tests, evidence, re-run steps, open items).
+- Dev server left running on http://localhost:3000; database intact (1 SUPER_ADMIN, 14 chemicals, 14 SDS).

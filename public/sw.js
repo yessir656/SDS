@@ -18,6 +18,8 @@ const CACHE_VERSION = 'sds-chem-v1';
 const PRECACHE_URLS = [
   '/',
   '/manifest.json',
+  '/icons/icon-16.png',
+  '/icons/icon-32.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon.svg',
