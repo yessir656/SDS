@@ -58,3 +58,9 @@ server.log
 # SQLite database file
 /db/*.db
 /db/*.db-journal
+# Runtime databases (Prisma SQLite) — never commit; fresh clones run db:push + db:seed
+prisma/db/*.db
+prisma/db/*.db-journal
+
+# Process PID files
+*.pid

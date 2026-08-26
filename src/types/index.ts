@@ -176,6 +176,10 @@ export interface CatalogStats {
   pictogramCounts: { pictogram: GhsPictogram; count: number }[];
   /** Department → count. */
   departmentCounts: { department: Department; count: number }[];
+  /** Regulatory tag → count (only tags on ≥1 chemical), sorted descending. */
+  regulatoryTagCounts: { tag: string; count: number }[];
+  /** Number of chemicals carrying at least one regulatory tag. */
+  regulatedCount: number;
 }
 
 /** Search/filter parameters for the catalog query. */
@@ -184,6 +188,10 @@ export interface CatalogQuery {
   departments: Department[];
   signalWords: SignalWord[];
   hazardClasses: HazardClass[];
+  /** Regulatory classification tags (DENR-EMB, PDEA, ...) — any-of filter. */
+  regulatoryTags: string[];
+  /** When true, show only chemicals that carry ANY regulatory tag. */
+  hasRegulatoryTag: boolean;
 }
 
 /** Application view state (single-route SPA). */

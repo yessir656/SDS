@@ -160,6 +160,32 @@ export async function syncNow(force = false): Promise<SyncResult> {
           await db.sdsBlobs.delete(id);
         }
 
+        // 4b. Reconcile HARD deletes: the delta feed can only report
+        // soft-deleted tombstones, so rows removed out-of-band (directly in
+        // the database) would linger in the local cache forever. Every sync
+        // carries the server's full active-ID list — drop anything local
+        // that the server no longer has, together with its cached SDS
+        // metadata and PDF blob.
+        if (Array.isArray(data.activeChemicalIds)) {
+          const activeIds = new Set<string>(data.activeChemicalIds);
+          const localIds = (await db.chemicals.toCollection().primaryKeys()).map(
+            String
+          );
+          for (const id of localIds) {
+            if (activeIds.has(id)) continue;
+            const sdsRecords = await db.sdsDocuments
+              .where("chemicalId")
+              .equals(id)
+              .toArray();
+            for (const sds of sdsRecords) {
+              await db.sdsDocuments.delete(sds.id);
+              await db.sdsBlobs.delete(sds.id);
+            }
+            await db.chemicals.delete(id);
+            chemicalsDeleted++;
+          }
+        }
+
         // 5. Update sync metadata with the server's current time.
         await db.syncMeta.put({
           id: "default",

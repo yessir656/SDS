@@ -314,31 +314,37 @@ export function parseSdsText(pages: string[]): ParsedSdsFields {
 
   // --- Identification -------------------------------------------------------
   // NOTE: real-world OCR frequently drops colons ("Product Name Acetone"), so
-  // label separators are optional.
+  // label separators are optional. Identity labels are LINE-ANCHORED: the word
+  // "supplier" appearing mid-sentence ("...from the supplier of the safety
+  // data sheet", seen on a real Fisher scan) must not be mistaken for a
+  // labeled value. Leading non-word junk (spaces, bullets) is tolerated.
+  const lineLabel = (body: string): RegExp =>
+    new RegExp(`^[^\\w\\n]*${body}\\s*(?:name)?\\s*[:\\-]?\\s+([^\\n]+)`, "im");
+
   const nameScope = sec1 || all.slice(0, 1500);
   const chemicalName = matchLabel(nameScope, [
-    /\bproduct\s*(?:name|identifier)\s*[:\-]?\s+([^\n]+)/i,
-    /\bchemical\s*name\s*[:\-]?\s+([^\n]+)/i,
-    /\bsubstance\s*(?:name)?\s*[:\-]?\s+([^\n]+)/i,
+    lineLabel("product\\s*(?:name|identifier)"),
+    lineLabel("chemical\\s*name"),
+    lineLabel("substance"),
   ]);
   const tradeName =
     matchLabel(nameScope, [
-      /\btrade\s*name\s*[:\-]?\s+([^\n]+)/i,
-      /\bsynonyms?\s*[:\-]?\s+([^\n]+)/i,
+      lineLabel("trade\\s*name"),
+      lineLabel("synonyms?"),
     ]) === chemicalName
       ? ""
       : matchLabel(nameScope, [
-          /\btrade\s*name\s*[:\-]?\s+([^\n]+)/i,
-          /\bsynonyms?\s*[:\-]?\s+([^\n]+)/i,
+          lineLabel("trade\\s*name"),
+          lineLabel("synonyms?"),
         ]);
 
   const manufacturer = matchLabel(nameScope, [
-    /\bmanufacturer\s*(?:name)?\s*[:\-]?\s+([^\n]+)/i,
-    /\bcompany\s*(?:name)?\s*[:\-]?\s+([^\n]+)/i,
+    lineLabel("manufacturer"),
+    lineLabel("company"),
   ]);
   const supplier = matchLabel(nameScope, [
-    /\bsupplier\s*(?:name)?\s*[:\-]?\s+([^\n]+)/i,
-    /\bdistributor\s*(?:name)?\s*[:\-]?\s+([^\n]+)/i,
+    lineLabel("supplier"),
+    lineLabel("distributor"),
   ]);
 
   // Emergency contact: labeled line preferred, else first phone-like token in

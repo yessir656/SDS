@@ -32,7 +32,9 @@ export function ChemicalCatalog() {
   const activeFilterCount =
     query.departments.length +
     query.signalWords.length +
-    query.hazardClasses.length;
+    query.hazardClasses.length +
+    query.regulatoryTags.length +
+    (query.hasRegulatoryTag ? 1 : 0);
 
   // Reactive query: re-runs whenever the query object changes.
   const chemicals = useLiveQuery(
@@ -50,7 +52,7 @@ export function ChemicalCatalog() {
     total: safeChemicals.length,
     // Reset to page 1 whenever the search term, filters, or loading state
     // produce a new result set.
-    deps: [query.search, query.departments, query.signalWords, query.hazardClasses, isLoading],
+    deps: [query.search, query.departments, query.signalWords, query.hazardClasses, query.regulatoryTags, query.hasRegulatoryTag, isLoading],
   });
   const pageItems = pagination.paginate(safeChemicals);
 
@@ -84,10 +86,11 @@ export function ChemicalCatalog() {
         {/* Active filter summary (always visible when filters active) */}
         {activeFilterCount > 0 && !showFilters && <FilterPanel />}
 
-        {/* Expandable full filter controls */}
+        {/* Expandable full filter controls — height-capped + scrollable so the
+            panel never takes over a phone screen */}
         {showFilters && (
           <Card>
-            <CardContent className="p-4">
+            <CardContent className="max-h-[60vh] overflow-y-auto p-3 sm:p-4">
               <FilterControls />
             </CardContent>
           </Card>

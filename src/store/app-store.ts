@@ -32,6 +32,9 @@ interface AppState {
   toggleDepartment: (dept: CatalogQuery["departments"][number]) => void;
   toggleSignalWord: (sw: CatalogQuery["signalWords"][number]) => void;
   toggleHazardClass: (hc: CatalogQuery["hazardClasses"][number]) => void;
+  toggleRegulatoryTag: (tag: string) => void;
+  /** Show only chemicals that carry any regulatory classification tag. */
+  toggleRegulatedOnly: () => void;
   clearFilters: () => void;
 
   // --- Actions: sync ---
@@ -44,6 +47,8 @@ const DEFAULT_QUERY: CatalogQuery = {
   departments: [],
   signalWords: [],
   hazardClasses: [],
+  regulatoryTags: [],
+  hasRegulatoryTag: false,
 };
 
 export const useAppStore = create<AppState>((set) => ({
@@ -104,6 +109,24 @@ export const useAppStore = create<AppState>((set) => ({
         },
       };
     }),
+
+  toggleRegulatoryTag: (tag) =>
+    set((s) => {
+      const has = s.query.regulatoryTags.includes(tag);
+      return {
+        query: {
+          ...s.query,
+          regulatoryTags: has
+            ? s.query.regulatoryTags.filter((x) => x !== tag)
+            : [...s.query.regulatoryTags, tag],
+        },
+      };
+    }),
+
+  toggleRegulatedOnly: () =>
+    set((s) => ({
+      query: { ...s.query, hasRegulatoryTag: !s.query.hasRegulatoryTag },
+    })),
 
   clearFilters: () => set({ query: DEFAULT_QUERY }),
 

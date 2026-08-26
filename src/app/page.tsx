@@ -28,20 +28,24 @@ export default function Home() {
   // --- Loading state ---
   if (dbState.status === "loading") {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
-        <div className="relative flex h-16 w-16 items-center justify-center">
-          <span className="absolute inset-0 animate-ping rounded-2xl bg-navy-600/20" />
+      // Flat poster moment: solid navy block + low-opacity geometric shapes.
+      <div className="relative flex min-h-screen flex-col items-center justify-center gap-6 overflow-hidden bg-navy-900">
+        <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-mirdc-cyan/10" />
+        <div className="absolute -bottom-28 -right-20 h-80 w-80 rotate-12 rounded-3xl bg-white/5" />
+        <div className="absolute right-16 top-14 h-16 w-16 rounded-full bg-white/5" />
+
+        <div className="relative flex h-20 w-20 items-center justify-center rounded-lg bg-white">
           <Image
             src="/dost-mirdc-logo.png"
             alt="DOST-MIRDC"
-            width={56}
-            height={56}
-            className="relative h-14 w-14 rounded-2xl object-contain shadow-lg"
+            width={64}
+            height={64}
+            className="h-16 w-16 object-contain"
             priority
           />
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+        <div className="relative flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-navy-100">
+          <Loader2 className="h-4 w-4 animate-spin text-mirdc-cyan" />
           <span>Loading chemical database…</span>
         </div>
       </div>

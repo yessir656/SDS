@@ -55,28 +55,37 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-navy-50 via-background to-navy-100/50 px-4 dark:from-navy-950 dark:via-background dark:to-navy-950/50">
+    // Flat poster: solid navy block, geometric shapes, white color-block card.
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-navy-900 px-4">
+      {/* Geometric decoration — low-opacity shapes, no depth */}
+      <div className="absolute -left-28 -top-28 h-80 w-80 rounded-full bg-mirdc-cyan/10" />
+      <div className="absolute -bottom-32 -right-24 h-96 w-96 rotate-12 rounded-3xl bg-white/5" />
+      <div className="absolute right-14 top-12 h-20 w-20 rounded-full bg-white/5" />
+      <div className="absolute bottom-20 left-16 h-10 w-10 rotate-45 rounded-md bg-mirdc-cyan/15" />
+
       {/* MIRDC logo + agency name */}
-      <div className="mb-6 flex flex-col items-center gap-3 text-center">
-        <Image
-          src="/dost-mirdc-logo.png"
-          alt="DOST-MIRDC logo"
-          width={64}
-          height={64}
-          className="h-16 w-16 rounded-lg object-contain shadow-sm"
-          priority
-        />
+      <div className="relative mb-6 flex flex-col items-center gap-3 text-center">
+        <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-white">
+          <Image
+            src="/dost-mirdc-logo.png"
+            alt="DOST-MIRDC logo"
+            width={64}
+            height={64}
+            className="h-16 w-16 object-contain"
+            priority
+          />
+        </div>
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-foreground">
+          <h1 className="text-2xl font-extrabold tracking-tight text-white">
             SDS-CHEM
           </h1>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs font-medium uppercase tracking-wider text-navy-200">
             DOST-MIRDC · Administrator Sign In
           </p>
         </div>
       </div>
 
-      <Card className="w-full max-w-sm border-navy-200/60 shadow-lg dark:border-navy-800/60">
+      <Card className="relative w-full max-w-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <ShieldAlert className="h-5 w-5 text-navy-600" />
@@ -116,14 +125,21 @@ export default function AdminLoginPage() {
               </p>
             )}
 
-            <Button type="submit" disabled={loading} className="w-full gap-2">
+            <Button
+              type="submit"
+              disabled={loading}
+              className="h-12 w-full gap-2 text-base"
+            >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               {loading ? "Signing in…" : "Sign In"}
             </Button>
           </form>
 
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            <a href="/" className="hover:underline">
+          <p className="mt-4 text-center text-xs">
+            <a
+              href="/"
+              className="font-medium text-navy-200 hover:text-white hover:underline"
+            >
               ← Back to public catalog
             </a>
           </p>

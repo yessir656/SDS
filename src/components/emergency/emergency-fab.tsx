@@ -50,8 +50,7 @@ export function EmergencyFab() {
             : "Quick access emergency information"
         }
         className={cn(
-          "fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-red-600 px-4 py-3.5 text-white shadow-lg shadow-red-600/30 transition-all duration-200 hover:bg-red-700 hover:shadow-xl hover:shadow-red-600/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 active:scale-95",
-          "animate-pulse-slow"
+          "fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-red-600 px-4 py-3.5 text-white transition-all duration-200 hover:bg-red-700 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 active:scale-95"
         )}
       >
         <ShieldAlert className="h-5 w-5" />

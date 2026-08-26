@@ -36,7 +36,7 @@ function ChemicalCardInner({ chemical }: ChemicalCardProps) {
         }
       }}
       className={cn(
-        "group relative cursor-pointer overflow-hidden transition-all duration-200 hover:border-navy-400 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "group relative cursor-pointer overflow-hidden transition-all duration-200 hover:scale-[1.02] hover:bg-navy-50/50 dark:hover:bg-navy-950/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         isDanger && "border-l-4 border-l-red-500",
         !isDanger && "border-l-4 border-l-amber-400"
       )}

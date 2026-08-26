@@ -54,9 +54,9 @@ export function EmergencyView() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-red-950/5 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-red-950/10">
       {/* Top bar */}
-      <div className="sticky top-0 z-10 border-b-2 border-red-600 bg-red-600 text-white shadow-lg">
+      <div className="sticky top-0 z-10 border-b-2 border-red-600 bg-red-600 text-white border border-border">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20">

@@ -59,6 +59,15 @@ export async function GET(request: Request) {
     select: { id: true },
   });
 
+  // Full list of currently-active chemical IDs. The delta feed above can only
+  // report SOFT deletes (tombstones) — rows hard-deleted out-of-band (e.g.
+  // directly in the database via Prisma Studio) produce no tombstone, so the
+  // client reconciles its cache against this complete set every sync.
+  const activeChemicals = await db.chemical.findMany({
+    where: { deletedAt: null },
+    select: { id: true },
+  });
+
   const chemicals = changedChemicals.map(serializeChemical);
   const sdsDocuments = changedSds.map(serializeSds);
   const deletedChemicalIds = deletedChemicals.map((c) => c.id);
@@ -69,5 +78,6 @@ export async function GET(request: Request) {
     sdsDocuments,
     deletedChemicalIds,
     deletedSdsIds: [] as string[],
+    activeChemicalIds: activeChemicals.map((c) => c.id),
   });
 }

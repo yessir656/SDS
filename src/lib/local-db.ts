@@ -18,7 +18,7 @@ import type {
   SdsBlobCache,
   SyncMeta,
 } from "@/types";
-import { ALL_GHS_PICTOGRAMS, DEPARTMENTS } from "@/types";
+import { ALL_GHS_PICTOGRAMS, DEPARTMENTS, REGULATORY_CLASSIFICATIONS } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Dexie database definition
@@ -142,7 +142,8 @@ export async function searchChemicals(
 ): Promise<ChemicalRecord[]> {
   await initDatabase();
 
-  const { search, departments, signalWords, hazardClasses } = query;
+  const { search, departments, signalWords, hazardClasses, regulatoryTags } =
+    query;
   const term = search.trim().toLowerCase();
 
   let results = await db.chemicals.filter((c) => !c.deletedAt).toArray();
@@ -173,6 +174,16 @@ export async function searchChemicals(
     results = results.filter((c) =>
       c.hazardClasses.some((hc) => hazardClasses.includes(hc))
     );
+  }
+
+  if (regulatoryTags.length > 0) {
+    results = results.filter((c) =>
+      (c.regulatoryTags ?? []).some((t) => regulatoryTags.includes(t))
+    );
+  }
+
+  if (query.hasRegulatoryTag) {
+    results = results.filter((c) => (c.regulatoryTags ?? []).length > 0);
   }
 
   results.sort((a, b) =>
@@ -233,6 +244,15 @@ export async function getCatalogStats(
     deptCounts[c.department] = (deptCounts[c.department] ?? 0) + 1;
   }
 
+  // Regulatory tags — only tags actually present on ≥1 chemical (mirrors the
+  // pictogram style; zero-count tags would just clutter the dashboard).
+  const tagCounts: Record<string, number> = {};
+  for (const c of list) {
+    for (const t of c.regulatoryTags ?? []) {
+      tagCounts[t] = (tagCounts[t] ?? 0) + 1;
+    }
+  }
+
   return {
     totalChemicals: list.length,
     dangerCount,
@@ -244,6 +264,12 @@ export async function getCatalogStats(
     departmentCounts: (Object.entries(deptCounts) as [Department, number][])
       .map(([department, count]) => ({ department, count }))
       .sort((a, b) => b.count - a.count),
+    regulatoryTagCounts: REGULATORY_CLASSIFICATIONS.map((tag) => ({
+      tag,
+      count: tagCounts[tag] ?? 0,
+    })).filter((x) => x.count > 0).sort((a, b) => b.count - a.count),
+    regulatedCount: list.filter((c) => (c.regulatoryTags ?? []).length > 0)
+      .length,
   };
 }
 
