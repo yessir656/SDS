@@ -2,7 +2,9 @@
 // GET  /api/admin/chemicals — list ACTIVE chemicals (soft-deleted tombstones
 //                              are hidden; they exist only so /api/sync can
 //                              propagate deletions to PWA clients)
-// POST /api/admin/chemicals — create a new chemical + placeholder SDS
+// POST /api/admin/chemicals — create a new chemical + placeholder SDS.
+//                              Re-adding an id that only has a soft-deleted
+//                              tombstone RESTORES that chemical instead.
 //
 // Admin-only. Server-side authorization enforced via requireAdmin().
 // ============================================================================
@@ -70,60 +72,76 @@ export async function POST(request: Request) {
   }
   const data = parsed.data;
 
-  // Guard: ID must be unique.
+  // Guard: ID must be unique among ACTIVE chemicals. A soft-deleted tombstone
+  // occupying the id is restorable — re-adding the same id resurrects it
+  // (the delete dialog promises "undo by re-adding the chemical").
   const existing = await db.chemical.findUnique({ where: { id: data.id } });
-  if (existing) {
+  if (existing && !existing.deletedAt) {
     return NextResponse.json(
       { error: "A chemical with this ID already exists" },
       { status: 409 }
     );
   }
 
-  // Create the chemical + placeholder SDS in a transaction.
+  const fields = {
+    casNumber: data.casNumber,
+    chemicalName: data.chemicalName,
+    formula: data.formula,
+    tradeName: data.tradeName || null,
+    manufacturer: data.manufacturer,
+    supplier: data.supplier,
+    signalWord: data.signalWord,
+    hazardClasses: JSON.stringify(data.hazardClasses),
+    ghsPictograms: JSON.stringify(data.ghsPictograms),
+    storageLocation: data.storageLocation,
+    department: data.department,
+    safetyInstructions: data.safetyInstructions,
+    version: data.version,
+    emergencyContact: data.emergencyContact,
+    personalProtectiveEquipment: JSON.stringify(data.personalProtectiveEquipment),
+    regulatoryTags: JSON.stringify(data.regulatoryTags ?? []),
+    firstAidMeasures: data.firstAidMeasures,
+    firefightingMeasures: data.firefightingMeasures,
+    accidentalReleaseMeasures: data.accidentalReleaseMeasures,
+    updatedById: session.user.id,
+  };
+
+  // Create the chemical + placeholder SDS in a transaction. If a soft-deleted
+  // chemical already owns this id, restore it instead: overwrite the fields,
+  // clear the tombstone, and bump serverVersion so clients re-sync it as
+  // active (clients that removed it locally re-add it from the delta feed).
   const chemical = await db.$transaction(async (tx) => {
-    const chem = await tx.chemical.create({
-      data: {
-        id: data.id,
-        casNumber: data.casNumber,
-        chemicalName: data.chemicalName,
-        formula: data.formula,
-        tradeName: data.tradeName || null,
-        manufacturer: data.manufacturer,
-        supplier: data.supplier,
-        signalWord: data.signalWord,
-        hazardClasses: JSON.stringify(data.hazardClasses),
-        ghsPictograms: JSON.stringify(data.ghsPictograms),
-        storageLocation: data.storageLocation,
-        department: data.department,
-        safetyInstructions: data.safetyInstructions,
-        version: data.version,
-        emergencyContact: data.emergencyContact,
-        personalProtectiveEquipment: JSON.stringify(data.personalProtectiveEquipment),
-        regulatoryTags: JSON.stringify(data.regulatoryTags ?? []),
-        firstAidMeasures: data.firstAidMeasures,
-        firefightingMeasures: data.firefightingMeasures,
-        accidentalReleaseMeasures: data.accidentalReleaseMeasures,
-        updatedById: session.user.id,
-      },
-    });
+    const chem = existing
+      ? await tx.chemical.update({
+          where: { id: existing.id },
+          data: { ...fields, deletedAt: null, serverVersion: { increment: 1 } },
+        })
+      : await tx.chemical.create({
+          data: { id: data.id, ...fields },
+        });
 
-    // Generate and store a placeholder PDF for this chemical.
-    const pdfBuffer = generatePlaceholderPdf(chem.chemicalName);
-    const storageKey = generateStorageKey();
-    await saveFile(pdfBuffer, storageKey);
+    // Fresh creates get a generated placeholder PDF. A restored chemical keeps
+    // whatever SDS row survived its deletion — auto-fill attaches the picked
+    // PDF right after save, which replaces it.
+    let sds = await tx.sdsDocument.findUnique({ where: { chemicalId: chem.id } });
+    if (!sds) {
+      const pdfBuffer = generatePlaceholderPdf(chem.chemicalName);
+      const storageKey = generateStorageKey();
+      await saveFile(pdfBuffer, storageKey);
 
-    const sds = await tx.sdsDocument.create({
-      data: {
-        chemicalId: chem.id,
-        storageKey,
-        originalFileName: "placeholder.pdf",
-        fileSize: pdfBuffer.length,
-        mimeType: "application/pdf",
-        contentHash: computeHash(pdfBuffer),
-        status: "placeholder",
-        version: 1,
-      },
-    });
+      sds = await tx.sdsDocument.create({
+        data: {
+          chemicalId: chem.id,
+          storageKey,
+          originalFileName: "placeholder.pdf",
+          fileSize: pdfBuffer.length,
+          mimeType: "application/pdf",
+          contentHash: computeHash(pdfBuffer),
+          status: "placeholder",
+          version: 1,
+        },
+      });
+    }
 
     return { chem, sds };
   });
@@ -131,10 +149,12 @@ export async function POST(request: Request) {
   const ctx = auditContext(session, request);
   await logAction({
     ctx,
-    action: "chemical.create",
+    action: existing ? "chemical.restore" : "chemical.create",
     entityType: "chemical",
     entityId: chemical.chem.id,
-    summary: `Created chemical "${chemical.chem.chemicalName}"`,
+    summary: existing
+      ? `Restored chemical "${chemical.chem.chemicalName}" (re-added after delete)`
+      : `Created chemical "${chemical.chem.chemicalName}"`,
     after: snapshotChemical(chemical.chem),
   });
 

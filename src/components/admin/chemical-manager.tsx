@@ -381,6 +381,8 @@ function ChemicalFormDialog({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while the post-save PDF attachment upload is in flight.
+  const [attachingPdf, setAttachingPdf] = useState(false);
 
   // AI auto-fill state.
   const [extracting, setExtracting] = useState(false);
@@ -542,6 +544,33 @@ function ChemicalFormDialog({
         throw new Error(err.error || `HTTP ${res.status}`);
       }
 
+      // Auto-attach the PDF chosen via Auto-fill so the real document replaces
+      // the generated placeholder immediately (same flow as Bulk Import).
+      // The chemical itself is already saved at this point — never lose the
+      // admin's work over a failed attachment, so failures surface as an
+      // alert and leave the record editable for a retry.
+      const pdfFile = lastFileRef.current;
+      if (pdfFile) {
+        setAttachingPdf(true);
+        try {
+          const fd = new FormData();
+          fd.append("file", pdfFile);
+          fd.append("chemicalId", form.id);
+          const sdsRes = await fetch("/api/admin/sds", { method: "POST", body: fd });
+          if (!sdsRes.ok) {
+            const sj = await sdsRes.json().catch(() => null);
+            throw new Error(sj?.error || `HTTP ${sdsRes.status}`);
+          }
+        } catch (attachErr) {
+          const msg = attachErr instanceof Error ? attachErr.message : String(attachErr);
+          window.alert(
+            `The chemical was saved, but the SDS PDF could not be attached (${msg}). Open Edit → Auto-fill with the same PDF and save again to retry.`
+          );
+        } finally {
+          setAttachingPdf(false);
+        }
+      }
+
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -561,8 +590,8 @@ function ChemicalFormDialog({
           <DialogTitle>{isEdit ? "Edit Chemical" : "Add New Chemical"}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update the chemical record. Changes will sync to all devices."
-              : "Create a new chemical. A placeholder SDS will be generated automatically."}
+              ? "Update the chemical record. Changes will sync to all devices. Auto-fill from a PDF also attaches the document when you save."
+              : "Create a new chemical. Use Auto-fill from PDF below to attach the real document — otherwise a placeholder SDS is generated."}
           </DialogDescription>
         </DialogHeader>
 
@@ -595,7 +624,7 @@ function ChemicalFormDialog({
                 {extracting ? "Reading SDS document…" : "Auto-fill from PDF"}
               </Button>
               <span className="text-xs text-muted-foreground">
-                Upload an SDS PDF — digital files extract instantly and free; scans run offline OCR. Gemini AI is only used as a fallback.
+                Upload an SDS PDF — digital files extract instantly and free; scans run offline OCR. Gemini AI is only used as a fallback. The PDF itself is attached to this chemical when you save.
               </span>
             </div>
 
@@ -648,6 +677,7 @@ function ChemicalFormDialog({
                     )}
                   </div>
                   <div className="mt-0.5">Please review all fields carefully before saving — automated extraction may have errors or omissions.</div>
+                  <div className="mt-0.5">This PDF is attached as the SDS document when you save.</div>
                   {extractNotice && (
                     <div className="mt-1 text-amber-700 dark:text-amber-300">{extractNotice}</div>
                   )}
@@ -911,7 +941,7 @@ function ChemicalFormDialog({
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving} className="gap-2">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isEdit ? "Save Changes" : "Create Chemical"}
+              {attachingPdf ? "Attaching PDF…" : isEdit ? "Save Changes" : "Create Chemical"}
             </Button>
           </div>
         </form>

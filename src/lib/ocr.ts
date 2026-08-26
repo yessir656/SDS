@@ -7,13 +7,21 @@
 // the existing pdf-rasterize pipeline and runs Tesseract.js (pure WASM — no
 // system dependencies) locally on each image. No API, no quota, works offline.
 //
+// OFFLINE GUARANTEE: the English language data is BUNDLED with the app at
+// <project>/tessdata/eng.traineddata.gz — no CDN download is ever attempted,
+// so OCR works with the network fully disconnected. (Previously the data was
+// fetched from tessdata.projectnaptha.com on first use and cached in the OS
+// temp dir; Windows temp cleanup could wipe it, leaving offline OCR hanging
+// on a CDN fetch that can never complete.)
+//
+// HANG GUARD: the whole batch runs under a hard deadline. Tesseract's worker
+// can block indefinitely if something goes wrong (bad data, worker crash) —
+// on timeout we reject with a clear error so the extraction route can fall
+// back to the AI tier / report a notice instead of spinning forever.
+//
 // Performance: pages are recognized IN PARALLEL by a small pool of workers
 // (default up to 4, or one per page if fewer). A 5-page scan drops from
 // ~15-20s sequential to ~5-8s wall time on a typical machine.
-//
-// NOTE: On the very first OCR run, Tesseract downloads the English language
-// data (~10-15 MB) from its CDN and caches it in the OS temp directory.
-// Subsequent runs are fully offline and fast.
 // ============================================================================
 
 import os from "os";
@@ -30,12 +38,19 @@ export interface OcrResult {
 const MAX_WORKERS = 4;
 
 /**
+ * Hard wall-clock deadline for the entire OCR batch (init + all pages).
+ * A healthy 5-page batch finishes in well under 30s; 90s means something is
+ * wedged (e.g. a corrupted worker) and we should fail loudly, not hang.
+ */
+const OCR_DEADLINE_MS = 90_000;
+
+/**
  * Run local OCR over an array of PNG buffers using a parallel worker pool.
  *
  * @param pngBuffers - PNG page images (from rasterizePdfToPngs).
  * @returns Per-page recognized text (same order as input) + total char count.
- * @throws Error with a user-actionable message if the OCR engine fails to
- *         initialize (e.g., language data could not be downloaded).
+ * @throws Error with a user-actionable message if the engine fails to
+ *         initialize or the deadline is exceeded.
  */
 export async function ocrPngBuffers(pngBuffers: Buffer[]): Promise<OcrResult> {
   // Dynamic import keeps tesseract.js out of the initial route bundle and,
@@ -44,35 +59,53 @@ export async function ocrPngBuffers(pngBuffers: Buffer[]): Promise<OcrResult> {
   // worker/WASM file lookups and the request hangs forever.
   const tesseract = await import("tesseract.js");
 
-  // Cache language data in the OS temp dir so repeat runs are offline+fast.
+  // Language data ships with the repo — fully offline, no CDN.
+  const langPath = path.join(process.cwd(), "tessdata");
+  // Worker-level cache dir (harmless; data is read from the repo bundle).
   const cachePath = path.join(os.tmpdir(), "sds-chem-tessdata");
   const workerCount = Math.max(1, Math.min(MAX_WORKERS, pngBuffers.length));
 
-  const createWorker = tesseract.createWorker;
-  const workers = await Promise.all(
-    Array.from({ length: workerCount }, () =>
-      createWorker("eng", 1, { cachePath, logger: () => {} })
-    )
-  );
+  const deadline = new Promise<never>((_, reject) => {
+    setTimeout(
+      () =>
+        reject(
+          new Error(
+            `Local OCR timed out after ${OCR_DEADLINE_MS / 1000}s — the engine appears wedged. Try "Retry with AI", or restart the server.`
+          )
+        ),
+      OCR_DEADLINE_MS
+    );
+  });
 
-  try {
-    const pages: string[] = new Array(pngBuffers.length).fill("");
-
-    // Round-robin pages across workers; each worker handles its share serially.
-    await Promise.all(
-      workers.map(async (worker, w) => {
-        for (let i = w; i < pngBuffers.length; i += workerCount) {
-          const { data } = await worker.recognize(pngBuffers[i]);
-          pages[i] = (data.text ?? "").trim();
-        }
-      })
+  const run = async (): Promise<OcrResult> => {
+    const createWorker = tesseract.createWorker;
+    const workers = await Promise.all(
+      Array.from({ length: workerCount }, () =>
+        createWorker("eng", 1, { langPath, cachePath, logger: () => {} })
+      )
     );
 
-    return {
-      pages,
-      totalChars: pages.reduce((sum, p) => sum + p.length, 0),
-    };
-  } finally {
-    await Promise.allSettled(workers.map((w) => w.terminate()));
-  }
+    try {
+      const pages: string[] = new Array(pngBuffers.length).fill("");
+
+      // Round-robin pages across workers; each worker handles its share serially.
+      await Promise.all(
+        workers.map(async (worker, w) => {
+          for (let i = w; i < pngBuffers.length; i += workerCount) {
+            const { data } = await worker.recognize(pngBuffers[i]);
+            pages[i] = (data.text ?? "").trim();
+          }
+        })
+      );
+
+      return {
+        pages,
+        totalChars: pages.reduce((sum, p) => sum + p.length, 0),
+      };
+    } finally {
+      await Promise.allSettled(workers.map((w) => w.terminate()));
+    }
+  };
+
+  return Promise.race([run(), deadline]);
 }

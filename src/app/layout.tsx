@@ -34,15 +34,17 @@ export const metadata: Metadata = {
   authors: [{ name: "DOST-MIRDC" }],
   manifest: "/manifest.json",
   icons: {
+    // ?v=2 cache-buster: browsers cache favicons aggressively per URL — the
+    // query string forces refetch after the icon set was regenerated.
     icon: [
-      { url: "/icons/icon-16.png", sizes: "16x16", type: "image/png" },
-      { url: "/icons/icon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/icon.svg", sizes: "any", type: "image/svg+xml" },
+      { url: "/icons/icon-16.png?v=2", sizes: "16x16", type: "image/png" },
+      { url: "/icons/icon-32.png?v=2", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192.png?v=2", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon.svg?v=2", sizes: "any", type: "image/svg+xml" },
     ],
-    shortcut: [{ url: "/icons/icon-32.png", type: "image/png" }],
+    shortcut: [{ url: "/icons/icon-32.png?v=2", type: "image/png" }],
     apple: [
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-192.png?v=2", sizes: "192x192", type: "image/png" },
     ],
   },
   appleWebApp: {

@@ -133,9 +133,12 @@ export const authOptions: NextAuthOptions = {
   },
   // Use NEXTAUTH_SECRET if provided; otherwise NextAuth generates one (dev only).
   secret: process.env.NEXTAUTH_SECRET,
-  // Trust the request's Host header so NextAuth works behind the preview
-  // gateway (preview-chat-<id>.space-z.ai) AND localhost:3000 without needing
-  // a hardcoded NEXTAUTH_URL. Without this, NextAuth v4 rejects the host in
-  // production with error=Configuration.
-  trustHost: true,
 };
+
+// Trust the request's Host header so auth works on any host (localhost:3000,
+// LAN IP, tunnel) without a hardcoded NEXTAUTH_URL. NOTE: NextAuth v4's
+// TypeScript types don't declare `trustHost` (it's a v5 concept) — the v4
+// runtime keys off NEXTAUTH_URL, with host validation relaxed when unset.
+// Set via assertion so this one untyped option doesn't force the whole
+// authOptions object to `any` (and so `next build` type-checking passes).
+(authOptions as { trustHost?: boolean }).trustHost = true;

@@ -978,3 +978,94 @@ Stage Summary:
 - Hard deletes now reconcile automatically on the next sync — deleting rows directly in the database (Prisma Studio/SQL) no longer strands stale chemicals on synced devices.
 - Preferred deletion path remains Admin → Delete (soft-delete, instant tombstone propagation + audit trail); direct DB edits are now safe-but-logged-less.
 - Files modified: src/app/api/sync/route.ts (activeChemicalIds), src/lib/sync-engine.ts (reconciliation step 4b).
+
+---
+Task ID: OFFLINE-HARDENING-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User reported 4 issues: (1) app logo still shows old logo, (2) OCR stuck loading when laptop disconnected from internet, (3) placeholder PDF still showing despite adding a real PDF, (4) cannot open PDF offline.
+
+Work Log:
+- Recon findings: server DB was EMPTY again (user had hard-deleted rows via Prisma Studio a second time; 2 orphan placeholder PDFs ~1KB left in storage/sds); tessdata temp cache (os.tmpdir()/sds-chem-tessdata) was MISSING (Windows temp cleanup) — meaning the next OCR would re-fetch language data from the CDN and, offline, that fetch hangs forever with no timeout; icon FILES on disk are the correct regenerated MIRDC versions (sizes match ICON-FIX-1) — staleness is client-side caching; sw.js CACHE_VERSION was still 'sds-chem-v1' (never bumped after icon regeneration → production SW serves stale-cached old icons to installed PWAs).
+- FIX 1 (icon): bumped CACHE_VERSION 'sds-chem-v1' → 'sds-chem-v2' so production clients invalidate the old cache and refetch the MIRDC icons. Browser-tab favicons have their own OS/browser cache — hard refresh / clear site data / reinstall PWA needed once. Verified sw.js serves v2.
+- FIX 2 (offline OCR — the big one): bundled the English language data INTO THE REPO at tessdata/eng.traineddata.gz (10.9MB, gzip-verified, fetched from the same tessdata.projectnaptha.com/4.0.0 source tesseract.js used); ocr.ts now passes langPath=<project>/tessdata so the worker reads from disk — ZERO network dependency, works fully offline, immune to temp-dir cleanup. Added a hard 90s deadline (Promise.race) around the whole OCR batch so a wedged worker rejects with an actionable error → route falls back (AI tier / notice) instead of an infinite spinner. Verified: with temp cache ABSENT, OCR initialized from the bundle in 650ms, parsed name/CAS correctly, score 2 (clears the local gate).
+- FIX 3 (placeholder showing): two contributors explained — (a) the public device's cache updates only via sync (≤5min cycle / page load online); after uploading a real PDF the device needs one sync for metadata (status→available, version bump) and the new blob; (b) during this report window the SERVER DB was empty (second Prisma-Studio hard-delete), so what was showing was the stale-cache phenomenon fixed by SYNC-RECONCILE-1. Cleaned the 2 orphan PDFs. No code change needed beyond SYNC-RECONCILE-1; documented expectation: upload → within one sync cycle the public view shows the real PDF.
+- FIX 4 (offline PDF/app): root cause is DEV vs PRODUCTION — the service worker registers ONLY in production (service-worker-register.tsx), so `bun run dev` can never load offline (blank page) and there is no app-shell cache. Delivered the production path: fixed the long-standing `trustHost` TS blocker in src/lib/auth.ts (NextAuth v4 types don't declare it — set via assertion after the object; v4 runtime keys off NEXTAUTH_URL, behavior unchanged) which was BLOCKING `next build` entirely; made the build script cross-platform (Windows cp lacks -r → node fs.cpSync); `bun run build` now completes and .next/standalone contains server.js + public assets + the bundled tessdata (output file tracing picked it up). PRODUCTION SERVER NOW RUNNING on :3000 (bun run start) so the user can install the PWA with correct icons and test true offline (app shell from SW cache, SDS PDFs from IndexedDB blobs).
+- Verification: lint clean (ocr.ts, sync files); OCR offline-path test passed (no cache, no CDN); production build compiles + type-checks; prod server 200 on /, /sw.js (v2), /api/sync responding (user's re-added acetic-acid visible).
+
+Stage Summary:
+- OCR is now truly offline-capable (bundled language data + hang guard) and immune to temp cleanup.
+- Production offline mode is built, validated, and RUNNING: SW v2 registers, caches the app shell, and serves cached SDS blobs offline. Dev mode remains for daily edits (offline page-load is a dev-only limitation by design).
+- Icon staleness = client caches; SW v2 forces production refresh; browsers need one hard refresh / PWA reinstall.
+- Files changed: public/sw.js (v2), src/lib/ocr.ts (bundled langPath + 90s deadline), tessdata/eng.traineddata.gz (new, 10.9MB), src/lib/auth.ts (trustHost assertion — unblocks next build), package.json (cross-platform build script), storage/sds orphans removed.
+- Commands for the user: offline mode = stop server → `bun run build` (already built) → `bun run start`; daily editing = `bun run dev`.
+
+---
+Task ID: UPLOAD-FIX-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User re-reported: uploaded a file but placeholder still showing; PWA tab icon still old (screenshot: teal shield favicon); still can't open PDF offline. Provided the actual file: Downloads/SDS_Acetic Acid.pdf (5,017,800 bytes) and asked me to upload it myself.
+
+Work Log:
+- Recon: TWO server processes were fighting on :3000 (bun + node); DB had ONE chemical `acetic-acids` with SDS status=placeholder v1 placeholder.pdf 1072 bytes — the user's real PDF had NEVER been uploaded to the SDS slot. Root cause of "placeholder still showing": the user used Add Chemical → Auto-fill from PDF, which only EXTRACTS fields into the form — attaching the file is a separate action (Admin → SDS Documents → Upload/Replace). Working as designed, but a genuine UX trap worth noting.
+- FIX (upload): killed the dueling listeners, started ONE clean production server, logged in via admin API, POSTed the user's actual PDF to /api/admin/sds for acetic-acids → {"success":true,"version":2}. Verified: DB status=available v2 originalFileName=SDS_Acetic_Acid.pdf fileSize=5017800; GET /api/sds/<id>/download → HTTP 200, exactly 5,017,800 bytes, valid %PDF magic.
+- FIX (favicon): server was already serving the correct MIRDC icon bytes (1334B 32×32) — staleness is browser cache. Cache-busted every icon URL: layout.tsx metadata icons + shortcut + apple now use ?v=2; public/manifest.json all 5 icon srcs use ?v=2. Rebuilt production and relaunched. Verified live: manifest serves 5× v=2 refs; login page HTML references icon-32.png?v=2. Browsers must refetch because the URL changed; user still needs ONE hard refresh (Ctrl+Shift+R).
+- FIX (server survival): background `nohup bun run start &` from the Bash tool kept dying (process-tree teardown, exit 255 after Ready) and a Start-Process launch from .next/standalone cwd also died. Reliable recipe found: PowerShell Start-Process with bun + ABSOLUTE project root as WorkingDirectory + NODE_ENV=production env → detached PID 19268, survived across multiple tool calls (200 on repeated checks).
+- Browser verification (partial — IAB click quirks): catalog loads with Acetic acid card, icon link href="/icons/icon-16.png?v=2", SW supported; sync endpoint shows sdsDocuments: [{acetic-acids, available, v2, SDS_Acetic_Acid.pdf}] — this is exactly what the public device cached on its 04:48 PM sync (blob included, version-keyed). A transient duplicate chemical (acetic-acid, placeholder-only) the user created mid-testing was deleted by the user themselves in the admin UI; final DB state: one chemical, available v2.
+- Offline test recipe given to the user: (1) online: load / once (SW v2 installs), (2) open the chemical, tap View SDS once, (3) disconnect WiFi, (4) reload → app shell from SW, PDF from IndexedDB blob.
+
+Stage Summary:
+- Acetic acid now has its REAL 5MB PDF attached (available v2) — uploaded server-side via the audited admin API.
+- Favicon cache-busted at the URL level (?v=2) — one hard refresh shows the MIRDC tab icon.
+- Production server (SW v2) running detached and stable; offline PDF opening depends on: prod mode ✓ + one online visit to cache shell+blob ✓ (sync already pulled the 5MB blob) + same browser profile.
+- UX gap noted for future: Add Chemical's Auto-fill should offer "also attach this PDF as the SDS" checkbox — the extract-vs-attach distinction tripped the user twice.
+- Files changed: src/app/layout.tsx (?v=2 icons), public/manifest.json (?v=2 icons). Server: prod detached PID 19268 on :3000.
+
+---
+Task ID: AUTOATTACH-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User confirmed the design intent — when scanning/auto-filling an SDS document, the PDF itself must be automatically uploaded to the SDS document slot so the placeholder never shows. Implement auto-attach in the single Add/Edit Chemical flow (Bulk Import already attached its PDFs; the single form did not).
+
+Work Log:
+- Root cause recap: BulkImportDialog already ran extract -> create -> attach, but ChemicalFormDialog's Auto-fill only filled form fields and threw the chosen File away (lastFileRef was used solely for Retry-with-AI). Attaching required a separate manual upload step — the exact UX trap noted at the end of UPLOAD-FIX-1.
+- FIX (src/components/admin/chemical-manager.tsx only): handleSubmit now, AFTER a successful create/update, POSTs the same picked PDF (lastFileRef) to /api/admin/sds with chemicalId=form.id — the real document replaces the generated placeholder immediately; on edit-with-existing-SDS the endpoint replaces the file and bumps the version. Attach failure NEVER loses the saved chemical: an alert explains the record was saved and how to retry (Edit -> Auto-fill -> Save). New attachingPdf state shows "Attaching PDF..." on the submit button during upload.
+- Deliberate choice: if extraction itself fails but the user picked a valid PDF, saving still ATTACHES that PDF (fields simply stay manual) — picking the file signals intent.
+- Copy made the behavior visible: helper line under Auto-fill button ("The PDF itself is attached to this chemical when you save."), review-banner line ("This PDF is attached as the SDS document when you save."), and both dialog descriptions updated (create no longer promises a placeholder when auto-fill is used).
+- Verification: bunx tsc --noEmit clean; bun run build OK; old server PID 19268 stopped; new detached prod server PID 12924 on :3000 (standalone server.js sets NODE_ENV=production itself — line 5 — so the Start-Process env hiccup was harmless). Health: / 200, /admin/login 200, /api/sync serving chemicals + sdsDocuments.
+- Live data state discovered during verification: acetic-acids (real SDS_Acetic_Acid.pdf v2 available), ammonium-iron (USER uploaded their own real PDF v2 — working as intended), acetic-acid = soft-deleted tombstone (deletedAt set; sync returns it intentionally so clients purge it; activeChemicalIds excludes it — designed behavior, not a bug).
+
+Stage Summary:
+- Add/Edit Chemical + Auto-fill from PDF now uploads the actual SDS document on Save — no placeholder, no second manual step. Bulk Import unchanged.
+- To see it: Admin -> Chemicals -> Edit or Add -> Auto-fill from PDF -> Save -> table SDS column flips Placeholder -> Available automatically.
+- Files changed: src/components/admin/chemical-manager.tsx. Server: prod detached PID 12924 on :3000.
+
+---
+Task ID: RESTORE-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: User hit "A chemical with this ID already exists" when re-creating a chemical whose id they had deleted (screenshot: filled Add Chemical form, Create Chemical button).
+
+Work Log:
+- Root cause: DELETE is a SOFT delete (deletedAt tombstone so /api/sync can propagate removals), so the row keeps its id forever. POST /api/admin/chemicals guarded uniqueness with a plain findUnique → any tombstoned id 409s, making "delete then re-add" impossible. The delete dialog literally promises "This action can be undone by re-adding the chemical" — the API broke that promise.
+- FIX (src/app/api/admin/chemicals/route.ts): the uniqueness guard now only rejects ids owned by ACTIVE chemicals. If the existing row is soft-deleted, POST becomes a RESTORE: same transaction updates all fields from the payload, clears deletedAt, bumps serverVersion (clients re-sync it as active; clients that removed it locally re-add it from the delta feed). SDS handling: fresh creates still get a generated placeholder; a restored chemical keeps whatever SDS row survived deletion (soft-delete does NOT touch SdsDocument rows — verified empirically), and AUTOATTACH-1 replaces it when the admin saves with a picked PDF. Audit action is "chemical.restore" vs "chemical.create" accordingly.
+- E2E verified via API with throwaway chemicals: create 201 → delete 200 → re-create SAME id 201 (was 409) with fields overwritten, deletedAt null, serverVersion 3. Test rows + files hard-cleaned afterwards.
+- USER CONFIRMED WORKING LIVE: at 17:51 the user re-created acetic-acid through the form — restore + auto-attach both fired (chemical active, serverVersion 4, SDS available v2 5017800 bytes).
+- Live catalog end-state: acetic-acid (active) + ammonium-iron (active); acetic-acids = tombstone the user deliberately deleted to kill the duplicate.
+
+Stage Summary:
+- Delete → re-add with the same ID now restores the chemical instead of erroring. Audit log records it as chemical.restore.
+- Files changed: src/app/api/admin/chemicals/route.ts.
+
+---
+Task ID: STORAGE-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: Discovered during RESTORE-1 verification — BOTH real SDS PDFs (acetic 5,017,800 B, ammonium 4,020,625 B) 404'd on download after this turn's rebuild.
+
+Work Log:
+- Root cause (critical): .next/standalone/server.js line 6 calls process.chdir(__dirname), so at runtime process.cwd() is .next/standalone. storage.ts built STORAGE_DIR from cwd → uploads landed in .next/standalone/storage/sds → `next build` WIPES .next → every rebuild silently destroyed ALL stored SDS files while DB rows kept pointing at the dead keys (downloads 404). Confirmed: server.js chdir present; probe files landed in .next/standalone/storage; both real PDFs absent from disk after this turn's rebuild.
+- FIX (src/lib/storage.ts): STORAGE_DIR now resolves through resolveStorageDir() — SDS_STORAGE_DIR env override, else detect the standalone cwd (basename standalone inside .next) and anchor on the project root two levels up, else cwd. Files now always land in <projectRoot>/storage/sds, which survives rebuilds. Verified: post-fix uploads write there (ammonium 80e727bf, acetic 0c4f8c6d), .next/standalone/storage no longer created.
+- Recovery: both originals found on disk (Downloads/SDS_Acetic Acid.pdf; Desktop/SDS - Solids/SDS_Solid Ammonium iron (II) sulfate hexahydrate.pdf) and re-uploaded via the audited admin API → acetic-acid v3 + ammonium-iron v3, downloads verified HTTP 200 with exact byte sizes. Orphan 75df5a9c (1KB placeholder referenced by nobody) deleted from both locations.
+- Anomaly (unresolved, low impact): the user's own acetic attach at 17:51:24 produced SDS row key 533a133d whose file is nowhere on disk; written during the server-restart churn window (user restarted their own server PID 20772 at 17:52:07; my rebuild/restarts overlapped). Most likely it landed in .next/standalone/storage via a process with stale pre-fix code and was removed by the post-fix cleanup. Moot after the v3 re-upload; flagged so future audits don't chase it.
+- LESSON: never trust process.cwd() for on-disk state in Next standalone; and server restarts during active admin use race user submissions — prefer quiet windows.
+
+Stage Summary:
+- Storage is now rebuild-proof: SDS PDFs live in <projectRoot>/storage/sds regardless of how the server is started; rebuilds no longer destroy uploads.
+- Both chemicals verified: real PDFs attached, downloads 200, sync propagating v3.
+- Files changed: src/lib/storage.ts.

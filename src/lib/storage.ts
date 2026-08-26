@@ -15,7 +15,28 @@ import { promises as fs } from "fs";
 import path from "path";
 import crypto from "crypto";
 
-const STORAGE_DIR = path.join(process.cwd(), "storage", "sds");
+// ---------------------------------------------------------------------------
+// Storage directory — anchored to the PROJECT ROOT, never raw process.cwd().
+//
+// Why: Next's standalone production server (.next/standalone/server.js) calls
+// process.chdir(__dirname), so at runtime cwd is .next/standalone — and
+// `next build` deletes .next entirely. A cwd-relative path therefore (a)
+// scatters uploads into .next/standalone/storage and (b) silently DESTROYS
+// every stored SDS file on each rebuild while the DB still points at the old
+// keys (downloads 404). Resolve the project root explicitly; the
+// SDS_STORAGE_DIR env var overrides for non-standard deployments.
+// ---------------------------------------------------------------------------
+function resolveStorageDir(): string {
+  if (process.env.SDS_STORAGE_DIR) return process.env.SDS_STORAGE_DIR;
+  const cwd = process.cwd();
+  const isStandalone =
+    path.basename(cwd) === "standalone" &&
+    path.basename(path.dirname(cwd)) === ".next";
+  const projectRoot = isStandalone ? path.resolve(cwd, "..", "..") : cwd;
+  return path.join(projectRoot, "storage", "sds");
+}
+
+const STORAGE_DIR = resolveStorageDir();
 
 /** Ensure the storage directory exists. */
 async function ensureStorageDir(): Promise<void> {

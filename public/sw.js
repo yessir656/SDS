@@ -12,7 +12,7 @@
  * Versioning: bump CACHE_VERSION to invalidate old caches on deploy.
  */
 
-const CACHE_VERSION = 'sds-chem-v1';
+const CACHE_VERSION = 'sds-chem-v2';
 
 // App shell URLs precached on install. Keep this list small and stable.
 const PRECACHE_URLS = [
