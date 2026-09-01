@@ -53,6 +53,12 @@ const OCR_DEADLINE_MS = 90_000;
  *         initialize or the deadline is exceeded.
  */
 export async function ocrPngBuffers(pngBuffers: Buffer[]): Promise<OcrResult> {
+  // No pages means nothing to recognize — return before initializing
+  // Tesseract so an empty PDF/scan doesn't spin up a worker pool for nothing.
+  if (pngBuffers.length === 0) {
+    return { pages: [], totalChars: 0 };
+  }
+
   // Dynamic import keeps tesseract.js out of the initial route bundle and,
   // together with serverExternalPackages in next.config.ts, forces Node to
   // load it natively from node_modules — bundling breaks its internal
