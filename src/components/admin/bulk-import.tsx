@@ -23,6 +23,7 @@
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
+import { generateChemicalId } from "@/lib/slug";
 import { Files, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,16 +65,19 @@ const STATUS_LABELS: Record<RowStatus, string> = {
   failed: "Failed",
 };
 
-/** Derive a schema-valid id slug from an extracted chemical name or filename. */
-function slugifyId(raw: string): string {
-  const base = raw
-    .toLowerCase()
+/** Derive a schema-valid id slug from an extracted chemical name + manufacturer.
+ *  Now uses the shared generateChemicalId helper so bulk-import produces the
+ *  same "aceticacid-fisher" format as the manual create form. Falls back to
+ *  the filename (minus .pdf) when the name is missing. */
+function slugifyId(rawName: string, manufacturer?: string): string {
+  const fromName = generateChemicalId(rawName, manufacturer);
+  if (fromName) return fromName;
+  const fromFile = rawName
     .replace(/\.pdf$/i, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 90)
-    .replace(/-+$/g, "");
-  return base || "chemical";
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 90);
+  return fromFile || "chemical";
 }
 
 export function BulkImportDialog({
@@ -214,7 +218,7 @@ export function BulkImportDialog({
         let finalId = "";
         let createRes: Response | null = null;
         let createJson: { error?: string } | null = null;
-        const base = slugifyId(baseName);
+        const base = slugifyId(baseName, payload.manufacturer || undefined);
         for (let attempt = 1; attempt <= 5; attempt++) {
           const candidate = attempt === 1 ? base : `${base}-${attempt}`;
           payload.id = candidate;

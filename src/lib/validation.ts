@@ -46,14 +46,22 @@ const nonEmptyString = (field: string) =>
     .min(1, `${field} is required`)
     .max(2000, `${field} is too long`);
 
-/** Schema for creating a new chemical. */
+/**
+ * Schema for creating a new chemical.
+ *
+ * `id` is OPTIONAL — when the admin leaves it blank, the server auto-generates
+ * it from `chemicalName` + `manufacturer` (e.g. "Acetic Acid" + "Fisher" →
+ * "aceticacid-fisher"). The admin can still type a custom ID; on collision with
+ * an active chemical the server auto-suffixes with -2, -3, … (so "aceticacid-
+ * fisher" becomes "aceticacid-fisher-2" if a record already owns that ID).
+ */
 export const createChemicalSchema = z.object({
   id: z
     .string()
     .trim()
-    .min(1)
     .max(100)
-    .regex(/^[a-z0-9-]+$/, "ID must be lowercase alphanumeric with dashes"),
+    .regex(/^[a-z0-9-]*$/, "ID must be lowercase alphanumeric with dashes")
+    .default(""),
   casNumber: nonEmptyString("CAS number").max(50),
   chemicalName: nonEmptyString("Chemical name").max(200),
   formula: nonEmptyString("Formula").max(100),

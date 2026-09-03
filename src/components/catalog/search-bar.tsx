@@ -1,13 +1,14 @@
 "use client";
 
 // ============================================================================
-// SearchBar — instant search with type-ahead suggestions
-// Uses useLiveQuery for reactive, effect-free suggestion fetching.
+// SearchBar — hero search with type-ahead suggestions
+// Fresh: oversized pill input that anchors the catalog, with a frosted dropdown.
+// Same contracts: useAppStore.setSearch + db.chemicals live query.
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Search, X, ArrowRight } from "lucide-react";
+import { Search, X, CornerDownLeft } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { db } from "@/lib/local-db";
@@ -22,14 +23,11 @@ export function SearchBar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Load all chemicals once via live query (reactive to DB changes).
   const allChemicals = useLiveQuery(() => db.chemicals.toArray(), [], []);
 
-  // Compute suggestions synchronously from the loaded chemicals.
   const suggestions = (() => {
     const term = search.trim().toLowerCase();
     if (!term || allChemicals.length === 0) return [];
-
     const matches = new Set<string>();
     for (const c of allChemicals) {
       if (c.chemicalName.toLowerCase().includes(term))
@@ -44,7 +42,6 @@ export function SearchBar() {
     return Array.from(matches).slice(0, 6);
   })();
 
-  // Close suggestions when clicking outside.
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -60,7 +57,6 @@ export function SearchBar() {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!showSuggestions || suggestions.length === 0) return;
-
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, suggestions.length - 1));
@@ -85,10 +81,11 @@ export function SearchBar() {
 
   return (
     <div ref={containerRef} className="relative w-full">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="group relative">
+        <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-mirdc-cyan" />
         <Input
           ref={inputRef}
+          id="catalog-search"
           type="search"
           value={search}
           onChange={(e) => {
@@ -100,7 +97,7 @@ export function SearchBar() {
           }}
           onKeyDown={handleKeyDown}
           placeholder="Search by name, trade name, CAS number, or formula…"
-          className="h-11 pl-9 pr-9 text-sm"
+          className="h-14 rounded-2xl border-2 border-border bg-card pl-12 pr-12 text-base shadow-panel transition-colors placeholder:text-muted-foreground/70 focus-visible:border-mirdc-cyan focus-visible:ring-mirdc-cyan/20"
           aria-label="Search chemicals"
           aria-autocomplete="list"
           aria-expanded={showSuggestions}
@@ -112,7 +109,7 @@ export function SearchBar() {
             variant="ghost"
             size="icon"
             onClick={clearSearch}
-            className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2"
+            className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full"
             aria-label="Clear search"
           >
             <X className="h-4 w-4" />
@@ -120,15 +117,15 @@ export function SearchBar() {
         )}
       </div>
 
-      {/* Type-ahead suggestions dropdown */}
+      {/* Frosted dropdown with type-ahead suggestions */}
       {showSuggestions && search.trim() && (
         <ul
           id="search-suggestions"
           role="listbox"
-          className="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-border bg-popover border border-border"
+          className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-border bg-popover/95 shadow-panel backdrop-blur-md"
         >
           {suggestions.length === 0 ? (
-            <li className="px-3 py-2.5 text-sm text-muted-foreground">
+            <li className="px-4 py-3 text-sm text-muted-foreground">
               No matches found
             </li>
           ) : (
@@ -145,14 +142,16 @@ export function SearchBar() {
                 }}
                 onMouseEnter={() => setActiveIndex(idx)}
                 className={cn(
-                  "flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm transition-colors",
+                  "flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-sm transition-colors",
                   idx === activeIndex
-                    ? "bg-accent text-accent-foreground"
-                    : "hover:bg-accent/50"
+                    ? "bg-mirdc-cyan/10 text-foreground"
+                    : "hover:bg-muted/60"
                 )}
               >
-                <span className="truncate">{suggestion}</span>
-                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate font-medium">{suggestion}</span>
+                {idx === activeIndex && (
+                  <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
               </li>
             ))
           )}

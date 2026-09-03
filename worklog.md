@@ -1069,3 +1069,25 @@ Stage Summary:
 - Storage is now rebuild-proof: SDS PDFs live in <projectRoot>/storage/sds regardless of how the server is started; rebuilds no longer destroy uploads.
 - Both chemicals verified: real PDFs attached, downloads 200, sync propagating v3.
 - Files changed: src/lib/storage.ts.
+
+---
+Task ID: AUTOID-1
+Agent: ZCode (orchestrator, user's local Windows PC)
+Task: Auto-generate the chemical ID on the single Add Chemical form from chemicalName + manufacturer (e.g. "Acetic Acid" + "Fisher" => "aceticacid-fisher"), so the admin no longer has to type it. The picked SDS PDF is still auto-attached on Save (AUTOATTACH-1).
+
+Work Log:
+- User request: when scanning/an auto-filling an SDS, the ID should be derived automatically from the chemical name + manufacturer instead of the admin typing it manually. Example given: acetic acid + fisher => aceticacid-fisher.
+- Verified against schema: src/lib/validation.ts `createChemicalSchema.id` rule = `^[a-z0-9-]+$` (max 100). Derivation must strip non-alphanumerics (spaces vanish, so "Acetic Acid" => "aceticacid"), lowercase, join name+manufacturer with "-".
+- Verified existing contract is still safe: src/app/api/admin/chemicals/route.ts enforces active-id uniqueness (409) and restores a tombstone on re-add (RESTORE-1) — so client-side auto-gen must remain editable and 409 must surface a helpful error, not silently fail.
+- Implementation (src/components/admin/chemical-manager.tsx):
+  * Added deriveId(chemicalName, manufacturer): slug = lowercase + strip non-[a-z0-9]; join parts with "-".
+  * Added idManuallyEdited state flag. In create mode only, a useEffect re-derives the id live from form.chemicalName + form.manufacturer and writes it into form.id — but stops overwriting once the admin edits the field by hand (so manual override is respected). In edit mode the field is untouched.
+  * ID input field: placeholder now shows the derived value, label changed to "auto-generated", and a helper line explains derivation + manual override. The `pattern="[a-z0-9-]+"` constraint is unchanged.
+  * 409 on save now throws a friendlier error with a suggested `<id>-2` suffix instead of a raw 409.
+- AUTOATTACH-1 already in place: after the POST/PUT succeeds, handleSubmit auto-attaches lastFileRef.current to /api/admin/sds (same contract as BulkImport), so the extracted PDF replaces the placeholder on save. Reused verbatim — no regression.
+- Checked: eslint clean on the file; `tsc --noEmit` reports no errors in edited files (only a pre-existing unrelated mock-typing error in src/lib/sync-engine.test.ts).
+- Server: prod instance already RUNNING on :3000 (PID 6868) from the prior turn; left it up so the app/PWA stays usable.
+
+Stage Summary:
+- The single Add Chemical form now auto-derives the ID from name + manufacturer while keeping it manually overridable, and still auto-attaches the picked PDF on Save — closing the "placeholder trap" for the single-form flow (Bulk Import already had it).
+- Files changed: src/components/admin/chemical-manager.tsx.

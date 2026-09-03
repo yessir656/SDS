@@ -38,12 +38,7 @@
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
 
-  /* ============================================================
-   * DOST-MIRDC brand palette — navy blue (primary theme color).
-   * Extracted from the official DOST-MIRDC brand guidelines.
-   * Navy-900 is the canonical brand navy; lighter shades are tints
-   * for backgrounds/borders, darker shades for hover/active states.
-   * ============================================================ */
+  /* DOST-MIRDC brand palette — PRESERVED (navy blue primary) */
   --color-navy-50: #f0f4f8;
   --color-navy-100: #d9e2ec;
   --color-navy-200: #bcccdc;
@@ -56,107 +51,111 @@
   --color-navy-900: #0a2540;
   --color-navy-950: #061a30;
 
-  /* MIRDC accent — cyan from the logo, used sparingly for highlights */
+  /* MIRDC accent — cyan from the logo (interactive highlights, data viz) */
   --color-mirdc-cyan: #00aeef;
-  /* MIRDC accent — red from the logo, used for emergency/danger emphasis */
+  /* MIRDC accent — red from the logo (emergency/danger ONLY) */
   --color-mirdc-red: #ed1c24;
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
 
-  /* Custom animations */
-  --animate-fade-in: fade-in 0.2s ease-out;
-  --animate-slide-up: slide-up 0.3s ease-out;
+  /* Fresh animations */
+  --animate-fade-in: fade-in 0.25s ease-out;
+  --animate-slide-up: slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-scale-in: scale-in 0.2s ease-out;
+  --animate-shimmer: shimmer 2s linear infinite;
 }
 
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-
 @keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(237, 28, 36, 0.5); }
+  70% { box-shadow: 0 0 0 12px rgba(237, 28, 36, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(237, 28, 36, 0); }
 }
 
 :root {
-  /* Flat design: consistent moderate radius (8px) */
-  --radius: 0.5rem;
-  /* Flat design: the page canvas is a light gray so white cards read as
-     clean color blocks — hierarchy via background contrast, not shadows. */
-  --background: oklch(0.973 0.005 247.9);
-  --foreground: oklch(0.145 0 0);
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.004 240);
+  --foreground: oklch(0.16 0.01 240);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.16 0.01 240);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  /* DOST-MIRDC navy blue — the official brand primary color */
+  --popover-foreground: oklch(0.16 0.01 240);
   --primary: #0a2540;
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.965 0.004 240);
+  --secondary-foreground: oklch(0.22 0.01 240);
+  --muted: oklch(0.965 0.004 240);
+  --muted-foreground: oklch(0.52 0.01 240);
+  --accent: oklch(0.96 0.004 240);
+  --accent-foreground: oklch(0.22 0.01 240);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: #334e68;
+  --border: oklch(0.91 0.004 240);
+  --input: oklch(0.91 0.004 240);
+  --ring: #00aeef;
   --chart-1: #0a2540;
   --chart-2: #00aeef;
   --chart-3: #486581;
   --chart-4: #ed1c24;
   --chart-5: #9fb3c8;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar: oklch(0.985 0.004 240);
+  --sidebar-foreground: oklch(0.16 0.01 240);
   --sidebar-primary: #0a2540;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.965 0.004 240);
+  --sidebar-accent-foreground: oklch(0.22 0.01 240);
+  --sidebar-border: oklch(0.91 0.004 240);
   --sidebar-ring: oklch(0.708 0 0);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  /* Lighter navy in dark mode for contrast against dark backgrounds */
-  --primary: #486581;
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.13 0.015 240);
+  --foreground: oklch(0.97 0.003 240);
+  --card: oklch(0.19 0.015 240);
+  --card-foreground: oklch(0.97 0.003 240);
+  --popover: oklch(0.19 0.015 240);
+  --popover-foreground: oklch(0.97 0.003 240);
+  --primary: #0a2540;
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.25 0.015 240);
+  --secondary-foreground: oklch(0.97 0.003 240);
+  --muted: oklch(0.25 0.015 240);
+  --muted-foreground: oklch(0.68 0.008 240);
+  --accent: oklch(0.25 0.015 240);
+  --accent-foreground: oklch(0.97 0.003 240);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: #627d98;
+  --input: oklch(1 0 0 / 14%);
+  --ring: #00aeef;
   --chart-1: #9fb3c8;
   --chart-2: #00aeef;
   --chart-3: #627d98;
   --chart-4: #ed1c24;
   --chart-5: #334e68;
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: #486581;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar: oklch(0.16 0.015 240);
+  --sidebar-foreground: oklch(0.97 0.003 240);
+  --sidebar-primary: #0a2540;
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.25 0.015 240);
+  --sidebar-accent-foreground: oklch(0.97 0.003 240);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 }
@@ -167,14 +166,19 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 }
 
-/* Custom scrollbar for long lists */
+/* Fresh utility layer — "Command Center" design primitives */
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    scrollbar-color: var(--navy-300) transparent;
+  }
+  .dark .scrollbar-thin {
+    scrollbar-color: var(--navy-700) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
@@ -184,15 +188,69 @@
     background: transparent;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: var(--border);
-    border-radius: 3px;
+    background-color: var(--navy-300);
+    border-radius: 999px;
+  }
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--navy-700);
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: var(--muted-foreground);
+    background-color: var(--navy-400);
+  }
+
+  .shadow-panel {
+    box-shadow:
+      0 1px 2px 0 rgb(10 37 64 / 0.04),
+      0 4px 16px -2px rgb(10 37 64 / 0.06);
+  }
+  .dark .shadow-panel {
+    box-shadow:
+      0 1px 2px 0 rgb(0 0 0 / 0.3),
+      0 6px 20px -4px rgb(0 0 0 / 0.4);
+  }
+
+  .bg-navy-hero {
+    background:
+      radial-gradient(120% 120% at 0% 0%, rgb(0 174 239 / 0.12) 0%, transparent 45%),
+      radial-gradient(100% 100% at 100% 100%, rgb(237 28 36 / 0.08) 0%, transparent 50%),
+      linear-gradient(135deg, #0a2540 0%, #061a30 100%);
+  }
+
+  .bg-grid {
+    background-image: radial-gradient(circle, rgb(10 37 64 / 0.04) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .dark .bg-grid {
+    background-image: radial-gradient(circle, rgb(255 255 255 / 0.025) 1px, transparent 1px);
+  }
+
+  .spine-danger {
+    background: linear-gradient(180deg, #ed1c24 0%, #b9151b 100%);
+  }
+  .spine-warning {
+    background: linear-gradient(180deg, #f59e0b 0%, #c2750a 100%);
+  }
+
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(255 255 255 / 0.5) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+
+  .pulse-emergency {
+    animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .step-badge {
+    background: linear-gradient(135deg, #0a2540 0%, #102a43 100%);
   }
 }
 
-/* Respect reduced motion preferences */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -201,4 +259,6 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  .pulse-emergency { animation: none !important; }
+  .shimmer { animation: none !important; }
 }

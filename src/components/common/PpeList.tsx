@@ -1,9 +1,10 @@
 // ============================================================================
 // PpeList — renders a chemical's PPE as icon + label (+ optional note).
+// Fresh: navy-tinted chips with cyan accent icons (matches the command center).
 // ----------------------------------------------------------------------------
 // Offline-first: icons are inline SVG via lucide-react (no remote images).
-// Each item's icon is chosen deterministically from its `code`; the note is
-// shown as a small muted badge (e.g. "powder-free").
+// Each item's icon is chosen deterministically from its `code`.
+// Contract preserved: normalizePpe() + PpeItem/PpeCode from @/types.
 // ============================================================================
 
 "use client";
@@ -27,17 +28,17 @@ import type { PpeItem, PpeCode } from "@/types";
 import { normalizePpe } from "@/lib/ppe";
 
 const ICON_COLORS: Record<PpeCode, string> = {
-  "gloves": "text-navy-600",
-  "gloves-powderfree": "text-navy-600",
-  "goggles": "text-blue-600",
-  "face-shield": "text-green-600",
-  "mask": "text-amber-600",
+  "gloves": "text-mirdc-cyan",
+  "gloves-powderfree": "text-mirdc-cyan",
+  "goggles": "text-mirdc-cyan",
+  "face-shield": "text-mirdc-cyan",
+  "mask": "text-mirdc-cyan",
   "respirator": "text-red-600",
-  "lab-coat": "text-slate-600",
-  "apron": "text-orange-600",
-  "boots": "text-amber-800",
-  "coverall": "text-indigo-600",
-  "hearing": "text-purple-600",
+  "lab-coat": "text-mirdc-cyan",
+  "apron": "text-mirdc-cyan",
+  "boots": "text-mirdc-cyan",
+  "coverall": "text-mirdc-cyan",
+  "hearing": "text-mirdc-cyan",
   "other": "text-muted-foreground",
 };
 
@@ -76,7 +77,7 @@ export function PpeList({ items, compact = false, iconsOnly = false }: PpeListPr
     );
   }
 
-  // Icon-only quick-scan row (e.g. beside the emergency contact).
+  // Icon-only quick-scan row.
   if (iconsOnly) {
     return (
       <div className="flex flex-wrap items-center gap-1.5">
@@ -86,7 +87,7 @@ export function PpeList({ items, compact = false, iconsOnly = false }: PpeListPr
           return (
             <span
               key={`${p.label}-${i}`}
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-navy-100 dark:bg-navy-900/50"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-100 ring-1 ring-navy-200 dark:bg-navy-900/60 dark:ring-navy-700"
               title={`${p.label}${p.note ? ` — ${p.note}` : ""}`}
               aria-label={`PPE: ${p.label}`}
             >
@@ -100,7 +101,7 @@ export function PpeList({ items, compact = false, iconsOnly = false }: PpeListPr
 
   return (
     <div
-      className={`flex flex-wrap gap-2 ${
+      className={`flex flex-wrap ${
         compact ? "gap-1.5" : "gap-2"
       }`}
     >
@@ -108,8 +109,8 @@ export function PpeList({ items, compact = false, iconsOnly = false }: PpeListPr
         const Icon = ICON_MAP[p.code] ?? ICON_MAP.other;
         const color = ICON_COLORS[p.code] ?? ICON_COLORS.other;
         const base = compact
-          ? "inline-flex items-center gap-1 rounded-md border border-navy-200 bg-navy-100 px-1.5 py-0.5 text-xs font-medium text-navy-900 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-100"
-          : "inline-flex items-center gap-2 rounded-lg border border-navy-200 bg-navy-100 px-3 py-2 text-sm font-medium text-navy-900 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-100";
+          ? "inline-flex items-center gap-1 rounded-md border border-navy-200 bg-navy-50 px-1.5 py-0.5 text-xs font-medium text-navy-900 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-100"
+          : "inline-flex items-center gap-2 rounded-lg border border-navy-200 bg-navy-50 px-3 py-2 text-sm font-medium text-navy-900 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-100";
         return (
           <span key={`${p.label}-${i}`} className={base}>
             <Icon className={`h-4 w-4 ${color}`} aria-hidden />

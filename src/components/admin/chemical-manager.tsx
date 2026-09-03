@@ -17,6 +17,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Files,
+  Sparkles,
+  RotateCcw,
 } from "lucide-react";
 import { BulkImportDialog } from "@/components/admin/bulk-import";
 import { Button } from "@/components/ui/button";
@@ -61,6 +63,7 @@ import {
   REGULATORY_CLASSIFICATIONS,
 } from "@/types";
 import type { Department, SignalWord, HazardClass, GhsPictogram } from "@/types";
+import { generateChemicalId } from "@/lib/slug";
 
 interface AdminChemical {
   id: string;
@@ -398,6 +401,47 @@ function ChemicalFormDialog({
 
   const isEdit = !!chemical;
 
+  // -------------------------------------------------------------------------
+  // Auto-ID generation: when the admin types the Chemical Name + Manufacturer,
+  // the ID field auto-fills with "{name}{manufacturer}" (e.g. "aceticacid-
+  // fisher"). The admin can still override by typing in the ID field directly —
+  // once they do, auto-generation pauses until they clear it. This is detected
+  // by comparing the current ID against what generateChemicalId() would have
+  // produced from the PREVIOUS name + manufacturer (empty also counts as auto).
+  // -------------------------------------------------------------------------
+  const updateForm = useCallback(
+    (
+      updatesOrFn:
+        | Partial<FormState>
+        | ((prev: FormState) => Partial<FormState>)
+    ) => {
+      setForm((prev) => {
+        const updates =
+          typeof updatesOrFn === "function" ? updatesOrFn(prev) : updatesOrFn;
+        const next = { ...prev, ...updates };
+        // Only auto-regenerate the ID in CREATE mode, and only when the
+        // chemical name or manufacturer is what changed. If the admin typed a
+        // custom ID (it doesn't match the old auto value), preserve it.
+        if (
+          !isEdit &&
+          (updates.chemicalName !== undefined ||
+            updates.manufacturer !== undefined)
+        ) {
+          const oldAutoId = generateChemicalId(
+            prev.chemicalName,
+            prev.manufacturer
+          );
+          const idWasAuto = !prev.id || prev.id === oldAutoId;
+          if (idWasAuto) {
+            next.id = generateChemicalId(next.chemicalName, next.manufacturer);
+          }
+        }
+        return next;
+      });
+    },
+    [isEdit]
+  );
+
   // ---------------------------------------------------------------------------
   // Auto-fill extraction — runs the tiered pipeline on the selected PDF.
   // Default (forceAI=false): free local tiers (embedded text → OCR), AI only
@@ -448,10 +492,10 @@ function ChemicalFormDialog({
         accidentalReleaseMeasures?: string;
       };
 
-      setForm((prev) => ({
-        ...prev,
-        // Preserve `id` — admin must always enter it manually in create mode.
-        id: prev.id,
+      // Build the next form state from the extracted fields, then let
+      // updateForm() auto-generate the ID from the new name + manufacturer
+      // (in create mode, only if the admin hadn't typed a custom ID).
+      updateForm((prev) => ({
         chemicalName: d.chemicalName || prev.chemicalName,
         casNumber: d.casNumber || prev.casNumber,
         formula: d.formula || prev.formula,
@@ -515,6 +559,43 @@ function ChemicalFormDialog({
     if (!file || extracting) return;
     await runExtraction(file, true);
   };
+
+  // --- Unsaved-changes guard + Cmd/Ctrl+Enter to save -----------------------
+  // Track whether the admin has touched the form so we can warn before closing.
+  // We capture a snapshot of the initial form state on mount (no-op for edit
+  // mode where "edits" are the meaningful delta). A second ref captures whether
+  // ANY field has been touched (including auto-fill), which is the safer
+  // trigger for the "discard changes?" confirm.
+  const formRef = useRef<HTMLFormElement>(null);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
+
+  // Submit programmatically when Cmd/Ctrl+Enter is pressed anywhere in the dialog.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        formRef.current?.requestSubmit();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Intercept the dialog close: if there are unsaved edits, ask first.
+  // The actual dirty-check is a simple ref-flag set by any onChange handler —
+  // we don't need a deep equality check; if the user touched anything, confirm.
+  const dirtyRef = useRef(false);
+  const markDirty = useCallback(() => {
+    dirtyRef.current = true;
+  }, []);
+
+  const requestClose = useCallback(() => {
+    if (dirtyRef.current && !saving && !attachingPdf) {
+      setShowDiscardConfirm(true);
+    } else {
+      onClose();
+    }
+  }, [saving, attachingPdf, onClose]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -584,10 +665,15 @@ function ChemicalFormDialog({
   };
 
   return (
-    <Dialog open={true} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={true} onOpenChange={(open) => !open && requestClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Chemical" : "Add New Chemical"}</DialogTitle>
+          <DialogTitle className="flex items-center justify-between gap-2">
+            <span>{isEdit ? "Edit Chemical" : "Add New Chemical"}</span>
+            <kbd className="hidden items-center gap-0.5 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
+              ⌘/Ctrl + ↵
+            </kbd>
+          </DialogTitle>
           <DialogDescription>
             {isEdit
               ? "Update the chemical record. Changes will sync to all devices. Auto-fill from a PDF also attaches the document when you save."
@@ -604,7 +690,7 @@ function ChemicalFormDialog({
           onChange={handleAutoFill}
         />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form ref={formRef} onSubmit={handleSubmit} onChange={markDirty} className="space-y-4">
           {/* Auto-fill from PDF banner / button */}
           <div className="space-y-2 rounded-lg border border-navy-200 bg-navy-50/60 p-3 dark:border-navy-900 dark:bg-navy-950/40">
             <div className="flex flex-wrap items-center gap-2">
@@ -707,25 +793,71 @@ function ChemicalFormDialog({
             )}
           </div>
 
-          {/* ID — only for create */}
+          {/* ID — only for create. Auto-generated from name + manufacturer. */}
           {!isEdit && (
             <div className="space-y-2">
-              <Label htmlFor="id">ID (lowercase, dashes only)</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="id">Chemical ID</Label>
+                {(() => {
+                  const autoId = generateChemicalId(form.chemicalName, form.manufacturer);
+                const isAuto = form.id === autoId && autoId !== "";
+                const isManual = form.id !== "" && form.id !== autoId;
+                return (
+                  <span className="flex items-center gap-2">
+                    {isAuto && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-mirdc-cyan/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mirdc-cyan ring-1 ring-mirdc-cyan/30">
+                        <Sparkles className="h-3 w-3" />
+                        Auto
+                      </span>
+                    )}
+                    {isManual && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateForm({ id: generateChemicalId(form.chemicalName, form.manufacturer) })
+                        }
+                        className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-mirdc-cyan/10 hover:text-mirdc-cyan"
+                        title="Reset to auto-generated ID"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        Reset to auto
+                      </button>
+                    )}
+                  </span>
+                );
+                })()}
+              </div>
               <Input
                 id="id"
                 value={form.id}
                 onChange={(e) => setForm({ ...form, id: e.target.value })}
-                required
-                placeholder="e.g. chem-acetone"
-                pattern="[a-z0-9-]+"
+                placeholder={
+                  form.chemicalName || form.manufacturer
+                    ? generateChemicalId(form.chemicalName, form.manufacturer) || "Type a name to auto-generate"
+                    : "e.g. aceticacid-fisher"
+                }
+                pattern="[a-z0-9-]*"
+                className={cn(
+                  form.id && form.id === generateChemicalId(form.chemicalName, form.manufacturer) && form.id !== ""
+                    ? "border-mirdc-cyan/40 bg-mirdc-cyan/5"
+                    : undefined
+                )}
+                aria-describedby="id-help"
               />
+              <p id="id-help" className="text-[11px] text-muted-foreground">
+                {form.id
+                  ? form.id === generateChemicalId(form.chemicalName, form.manufacturer)
+                    ? <>Auto-generated from <strong className="text-foreground">{form.chemicalName || "name"}</strong> + <strong className="text-foreground">{form.manufacturer || "manufacturer"}</strong>. Edit if you want a custom ID.</>
+                    : "Custom ID — you can edit freely."
+                  : "Auto-fills as you type the chemical name and manufacturer."}
+              </p>
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="chemicalName">Chemical Name</Label>
-              <Input id="chemicalName" value={form.chemicalName} onChange={(e) => setForm({ ...form, chemicalName: e.target.value })} required />
+              <Input id="chemicalName" value={form.chemicalName} onChange={(e) => updateForm({ chemicalName: e.target.value })} required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="casNumber">CAS Number</Label>
@@ -747,7 +879,7 @@ function ChemicalFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="manufacturer">Manufacturer</Label>
-              <Input id="manufacturer" value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} />
+              <Input id="manufacturer" value={form.manufacturer} onChange={(e) => updateForm({ manufacturer: e.target.value })} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="supplier">Supplier</Label>
@@ -938,7 +1070,7 @@ function ChemicalFormDialog({
           )}
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={requestClose}>Cancel</Button>
             <Button type="submit" disabled={saving} className="gap-2">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {attachingPdf ? "Attaching PDF…" : isEdit ? "Save Changes" : "Create Chemical"}
@@ -946,6 +1078,32 @@ function ChemicalFormDialog({
           </div>
         </form>
       </DialogContent>
+
+      {/* Unsaved-changes guard — shows when the admin tries to close with pending edits. */}
+      <AlertDialog open={showDiscardConfirm} onOpenChange={setShowDiscardConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard your changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved edits to this chemical. Discarding will close
+              the form and lose your changes. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                dirtyRef.current = false;
+                setShowDiscardConfirm(false);
+                onClose();
+              }}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

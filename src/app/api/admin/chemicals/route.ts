@@ -17,6 +17,7 @@ import { serializeChemical, serializeSds } from "@/lib/serialize";
 import { generateStorageKey, saveFile, computeHash } from "@/lib/storage";
 import { generatePlaceholderPdf } from "@/lib/pdf-placeholder";
 import { logAction, auditContext, snapshotChemical } from "@/lib/audit";
+import { generateChemicalId } from "@/lib/slug";
 
 export const dynamic = "force-dynamic";
 
@@ -72,15 +73,46 @@ export async function POST(request: Request) {
   }
   const data = parsed.data;
 
-  // Guard: ID must be unique among ACTIVE chemicals. A soft-deleted tombstone
-  // occupying the id is restorable — re-adding the same id resurrects it
-  // (the delete dialog promises "undo by re-adding the chemical").
-  const existing = await db.chemical.findUnique({ where: { id: data.id } });
-  if (existing && !existing.deletedAt) {
-    return NextResponse.json(
-      { error: "A chemical with this ID already exists" },
-      { status: 409 }
-    );
+  // ---------------------------------------------------------------------
+  // Auto-generate the ID if the admin left it blank.
+  // Format: "{chemicalName}-{manufacturer}" → "aceticacid-fisher".
+  // Falls back to the chemical name alone when no manufacturer is set.
+  // ---------------------------------------------------------------------
+  let finalId = data.id;
+  if (!finalId) {
+    finalId = generateChemicalId(data.chemicalName, data.manufacturer);
+    if (!finalId) {
+      // The chemical name slugified to empty (e.g. name was "!!!" only).
+      // Last-resort fallback so the DB unique constraint doesn't 500.
+      finalId = `chem-${Date.now().toString(36)}`;
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Resolve the ID against existing records (active OR soft-deleted).
+  //
+  // - Soft-deleted tombstone with this ID  → RESTORE it (overwrite fields,
+  //   clear the tombstone, bump serverVersion). This is the existing "undo
+  //   delete by re-adding" contract.
+  // - Active record with this ID           → COLLISION. Auto-suffix with
+  //   -2, -3, … (-1 is the base). This means two "Acetic Acid" + "Fisher"
+  //   records become "aceticacid-fisher" and "aceticacid-fisher-2". Tries
+  //   up to 99 suffixes before giving up and returning 409.
+  // ---------------------------------------------------------------------
+  let existing = await db.chemical.findUnique({ where: { id: finalId } });
+  let suffixAttempt = 1;
+  while (existing && !existing.deletedAt) {
+    suffixAttempt++;
+    if (suffixAttempt > 99) {
+      return NextResponse.json(
+        {
+          error: `A chemical with this ID already exists (tried ${finalId} through ${finalId}-99)`,
+        },
+        { status: 409 }
+      );
+    }
+    finalId = `${data.id || generateChemicalId(data.chemicalName, data.manufacturer)}-${suffixAttempt}`;
+    existing = await db.chemical.findUnique({ where: { id: finalId } });
   }
 
   const fields = {
@@ -117,7 +149,7 @@ export async function POST(request: Request) {
           data: { ...fields, deletedAt: null, serverVersion: { increment: 1 } },
         })
       : await tx.chemical.create({
-          data: { id: data.id, ...fields },
+          data: { id: finalId, ...fields },
         });
 
     // Fresh creates get a generated placeholder PDF. A restored chemical keeps

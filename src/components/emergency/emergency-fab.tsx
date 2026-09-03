@@ -1,9 +1,9 @@
 "use client";
 
 // ============================================================================
-// EmergencyFab — persistent floating action button for emergency access
-// - In detail view: goes directly to the selected chemical's emergency info
-// - In catalog view: opens a quick-select dialog to pick a chemical
+// EmergencyFab — floating action button for one-tap emergency access.
+// Fresh: pill with a subtle pulse ring + frosted quick-select dialog.
+// Contracts preserved: useAppStore + db.chemicals + GhsPictogram.
 // ============================================================================
 
 import { useState } from "react";
@@ -29,8 +29,8 @@ export function EmergencyFab() {
   const goToEmergency = useAppStore((s) => s.goToEmergency);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // If we're already in emergency view, don't show the FAB.
-  if (currentView === "emergency") return null;
+  // Hide the FAB in the emergency view AND the detail view.
+  if (currentView === "emergency" || currentView === "detail") return null;
 
   const handleClick = () => {
     if (selectedChemical) {
@@ -50,7 +50,7 @@ export function EmergencyFab() {
             : "Quick access emergency information"
         }
         className={cn(
-          "fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-red-600 px-4 py-3.5 text-white transition-all duration-200 hover:bg-red-700 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 active:scale-95"
+          "pulse-emergency fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-red-600 px-5 py-3.5 text-white shadow-xl transition-all duration-200 hover:scale-105 hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2 active:scale-95"
         )}
       >
         <ShieldAlert className="h-5 w-5" />
@@ -110,13 +110,13 @@ function QuickSelectDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md gap-0 p-0">
-        <DialogHeader className="border-b border-border px-4 py-3">
+      <DialogContent className="max-w-md gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b border-border bg-red-600 px-4 py-3.5 text-white">
           <DialogTitle className="flex items-center gap-2 text-base">
-            <ShieldAlert className="h-5 w-5 text-red-600" />
+            <ShieldAlert className="h-5 w-5" />
             Emergency Quick Access
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription className="text-xs text-red-100">
             Select a chemical to view its emergency response information.
           </DialogDescription>
         </DialogHeader>
@@ -128,7 +128,7 @@ function QuickSelectDialog({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Type to search chemicals…"
-              className="h-10 pl-9 pr-9 text-sm"
+              className="h-11 rounded-xl pl-9 pr-9 text-sm"
               autoFocus
             />
             {search && (
@@ -136,7 +136,7 @@ function QuickSelectDialog({
                 variant="ghost"
                 size="icon"
                 onClick={() => setSearch("")}
-                className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
+                className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2"
                 aria-label="Clear search"
               >
                 <X className="h-3.5 w-3.5" />
@@ -145,7 +145,7 @@ function QuickSelectDialog({
           </div>
         </div>
 
-        <div className="max-h-[50vh] overflow-y-auto p-2">
+        <div className="max-h-[50vh] overflow-y-auto p-2 scrollbar-thin">
           {chemicals && chemicals.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
               No chemicals found.
@@ -156,18 +156,18 @@ function QuickSelectDialog({
                 <li key={c.id}>
                   <button
                     onClick={() => handleSelect(c.id)}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-mirdc-cyan/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mirdc-cyan"
                   >
                     <div className="flex gap-1">
                       {c.ghsPictograms.slice(0, 2).map((p) => (
-                        <GhsPictogram key={p} pictogram={p} size={28} />
+                        <GhsPictogram key={p} pictogram={p} size={30} />
                       ))}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">
+                      <div className="truncate text-sm font-semibold">
                         {c.chemicalName}
                       </div>
-                      <div className="truncate text-xs text-muted-foreground">
+                      <div className="truncate font-mono text-xs text-muted-foreground">
                         CAS {c.casNumber} · {c.storageLocation}
                       </div>
                     </div>

@@ -1,7 +1,8 @@
 "use client";
 
 // ============================================================================
-// AppHeader — top navigation bar with DOST-MIRDC logo, title, status, theme toggle
+// AppHeader — "Command Bar"
+// Full-bleed navy hero with MIRDC logo, wordmark, status pills, and theme toggle.
 // ============================================================================
 
 import Image from "next/image";
@@ -16,47 +17,57 @@ export function AppHeader() {
   const currentView = useAppStore((s) => s.currentView);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/60">
-      <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6">
-        {/* Logo + title (click to return to catalog) */}
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-navy-hero">
+      <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+        {/* Logo + wordmark (click returns to catalog) */}
         <button
           onClick={goToCatalog}
-          className="flex items-center gap-2.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex items-center gap-3 rounded-xl px-1.5 py-1 outline-none transition-colors hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-mirdc-cyan/60"
           aria-label="SDS-CHEM home"
         >
-          <Image
-            src="/dost-mirdc-logo.png"
-            alt="DOST-MIRDC logo"
-            width={36}
-            height={36}
-            className="h-9 w-9 shrink-0 rounded-md object-contain"
-            priority
-          />
+          <span className="relative flex h-10 w-10 items-center justify-center rounded-lg bg-white/95 shadow-lg">
+            <Image
+              src="/dost-mirdc-logo.png"
+              alt="DOST-MIRDC logo"
+              width={32}
+              height={32}
+              className="h-8 w-8 object-contain"
+              priority
+            />
+          </span>
           <span className="hidden flex-col items-start leading-none sm:flex">
-            <span className="text-base font-bold tracking-tight text-foreground">
+            <span className="text-[15px] font-bold tracking-tight text-white">
               SDS-CHEM
             </span>
-            <span className="text-[11px] text-muted-foreground">
-              DOST-MIRDC Safety Data Sheet System
+            <span className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.18em] text-navy-200">
+              DOST-MIRDC
             </span>
           </span>
-          <span className="text-base font-bold tracking-tight text-foreground sm:hidden">
+          <span className="text-[15px] font-bold tracking-tight text-white sm:hidden">
             SDS-CHEM
           </span>
         </button>
 
-        <div className="ml-auto flex items-center gap-2 sm:gap-3">
-          <SyncStatusIndicator />
-          <OfflineIndicator compact />
+        {/* Status cluster — pushed right. Frosted chips separate them visually. */}
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+          <span className="flex h-9 items-center gap-1.5 rounded-full bg-white/10 px-2.5 backdrop-blur-sm">
+            <SyncStatusIndicator />
+          </span>
+          <span className="flex h-9 items-center rounded-full bg-white/10 px-2.5 backdrop-blur-sm">
+            <OfflineIndicator compact />
+          </span>
 
           {currentView === "detail" && (
-            <span className="hidden items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300 md:inline-flex">
+            <span className="hidden items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-300 ring-1 ring-amber-400/30 md:inline-flex">
               <ShieldAlert className="h-3.5 w-3.5" />
               Emergency ready
             </span>
           )}
 
-          <ThemeToggle />
+          {/* Theme toggle sits on a frosted chip so it reads on navy */}
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm">
+            <ThemeToggle />
+          </span>
         </div>
       </div>
     </header>
