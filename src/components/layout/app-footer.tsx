@@ -1,11 +1,23 @@
 "use client";
 
 // ============================================================================
-// AppFooter — sticky footer with DOST-MIRDC org info
+// AppFooter — sticky footer with DOST-MIRDC org info + legal links
 // Fresh: navy band that anchors the page bottom, with a subtle cyan hairline.
 // ============================================================================
 
 import Image from "next/image";
+import Link from "next/link";
+
+function FooterNavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="text-navy-200 underline decoration-mirdc-cyan/30 underline-offset-2 hover:text-white hover:decoration-mirdc-cyan"
+    >
+      {children}
+    </Link>
+  );
+}
 
 export function AppFooter() {
   return (
@@ -32,9 +44,16 @@ export function AppFooter() {
             </span>
           </div>
         </div>
-        <p className="order-first text-[10px] font-medium uppercase tracking-[0.2em] text-navy-300 sm:order-none">
-          Offline-first · Works without internet
-        </p>
+        <div className="flex flex-col items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-navy-300 sm:order-none sm:flex-row">
+          <p className="order-first sm:order-none">Offline-first · Works without internet</p>
+          <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+            <FooterNavLink href="/privacy">Privacy</FooterNavLink>
+            <span className="hidden sm:inline text-navy-600 dark:text-navy-700">·</span>
+            <FooterNavLink href="/terms">Terms</FooterNavLink>
+            <span className="hidden sm:inline text-navy-600 dark:text-navy-700">·</span>
+            <FooterNavLink href="/cookie-policy">Cookie Policy</FooterNavLink>
+          </div>
+        </div>
       </div>
     </footer>
   );

@@ -1091,3 +1091,34 @@ Work Log:
 Stage Summary:
 - The single Add Chemical form now auto-derives the ID from name + manufacturer while keeping it manually overridable, and still auto-attaches the picked PDF on Save — closing the "placeholder trap" for the single-form flow (Bulk Import already had it).
 - Files changed: src/components/admin/chemical-manager.tsx.
+
+---
+Task ID: COMPLIANCE-1
+Agent: ZCode (orchestrator, user's local Windows PC)
+Task: Add Privacy Policy, Terms & Conditions, Cookie Policy pages, a cookie-consent banner, and a mandatory consent checkbox on the admin login form.
+
+Work Log:
+- Verified actual data practices before writing any legal text (per "read docs before claims"):
+  * Cookies: only NextAuth session cookie (httpOnly, SameSite=Lax, Secure in prod) + a transient CSRF cookie on sign-in. No analytics / marketing / third-party tracking (grep for gtag/ga/hotjar/plausible/umami/etc. across src + public found none; only a robots.txt mention of facebookexternalhit).
+  * Client storage: IndexedDB (Dexie catalog cache), localStorage (prefs, recently-viewed, theme), and SW Cache API (app shell + static assets + SDS PDFs). All first-party, enables offline.
+  * Server storage: local SQLite custom.db + /storage/sds PDFs. No external sharing.
+- Created shared shell src/components/common/legal-page.tsx (flat design: gray canvas, white card, borders not shadows, Outfit via font-sans; includes a prominent "template, not legal advice — review with DOST-MIRDC counsel" banner on every page).
+- Created policy pages (all prerendered static, verified HTTP 200):
+  * src/app/privacy/page.tsx — Privacy Policy.
+  * src/app/terms/page.tsx — Terms & Conditions (incl. an "Accuracy of automated extraction" clause reflecting that AI/OCR auto-fill can err and the admin must review fields).
+  * src/app/cookie-policy/page.tsx — Cookie Policy with a cookie + client-storage table and management instructions.
+- Created src/components/common/cookie-consent.tsx:
+  * SSR-safe: lazy useState initializer reads localStorage, never calls setState in an effect (fixed an initial eslint react-hooks/set-state-in-effect lint by switching from useEffect+setState to a lazy initializer).
+  * Shows on the public catalog on first visit; hidden automatically on /admin/login (that form is the dedicated consent gate).
+  * Accept → localStorage "accepted" + sets a 365-day sds_cookies_accepted cookie. Dismiss (X) → "seen" (informed, not consent; banner does not re-appear; policy page still reachable from footer).
+  * Flat design: white card, colored border, navy/mirdc-cyan accents, no shadows.
+- Wired banner into src/app/layout.tsx (<CookieConsent /> after ServiceWorkerRegister).
+- Added FooterNavLink links (Privacy / Terms / Cookie Policy) to src/components/layout/app-footer.tsx (footer now lives on every public page incl. policy pages).
+- Added a required consent checkbox to src/app/admin/login/page.tsx ("I have read and agree to the Terms & Conditions and Privacy Policy, and acknowledge that only essential login cookies are used"); submit is blocked until checked. Links open policy pages in a new tab.
+- Build: `bun run build` succeeded; /privacy /terms /cookie-policy and /admin/login all prerender/SSR without errors. Three new routes appear as static in the build output.
+- Server: stopped the old prod instance on :3000 (PID 22948), built, and started a fresh detached production server (bun .next/standalone/server.js). Verified HTTP 200 on /, /privacy, /terms, /cookie-policy, and the login form contains id="consent" + the Terms/Privacy links. Confirmed the cookie-consent banner ships into the client JS bundle.
+- Lint: clean on all changed/new files. tsc --noEmit: no errors in any changed file (only a pre-existing unrelated mock-typing error in src/lib/sync-engine.test.ts).
+
+Stage Summary:
+- Legal/compliance surface shipped: policies + cookie-consent banner + login form consent, all in the flat design system, server live on :3000.
+- Files changed: src/components/common/cookie-consent.tsx (new), src/components/common/legal-page.tsx (new), src/app/privacy/page.tsx (new), src/app/terms/page.tsx (new), src/app/cookie-policy/page.tsx (new), src/app/layout.tsx, src/components/layout/app-footer.tsx, src/app/admin/login/page.tsx.

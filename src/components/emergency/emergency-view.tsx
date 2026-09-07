@@ -119,10 +119,10 @@ export function EmergencyView() {
             {chemical.ghsPictograms.map((p) => (
               <div
                 key={p}
-                className="flex items-center gap-2.5 rounded-xl border border-red-100 bg-card px-3.5 py-2.5"
+                className="flex items-center gap-2.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5"
               >
                 <GhsPictogram pictogram={p} size={42} />
-                <span className="text-sm font-semibold">
+                <span className="text-sm font-semibold text-gray-900">
                   {p
                     .split("-")
                     .map((w) => w[0].toUpperCase() + w.slice(1))
@@ -154,9 +154,9 @@ export function EmergencyView() {
         />
 
         {/* Required PPE */}
-        <section className="rounded-2xl border-2 border-navy-300 bg-white/95 p-5 backdrop-blur-sm dark:border-navy-700">
-          <h2 className="mb-3.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-navy-700 dark:text-navy-300">
-            <HardHat className="h-4 w-4 text-navy-600 dark:text-navy-300" />
+        <section className="rounded-2xl border-2 border-navy-300 bg-white/95 p-5 backdrop-blur-sm">
+          <h2 className="mb-3.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-navy-700">
+            <HardHat className="h-4 w-4 text-navy-600" />
             Required Personal Protective Equipment
           </h2>
           <PpeList items={chemical.personalProtectiveEquipment} />
@@ -170,10 +170,10 @@ export function EmergencyView() {
             Emergency Contact
           </h2>
           <div className="flex flex-wrap items-center gap-4">
-            <p className="text-2xl font-bold text-red-900 dark:text-red-100">
+            <p className="text-2xl font-bold text-red-900">
               {chemical.emergencyContact}
             </p>
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-red-700/80 dark:text-red-300/80">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-red-700/80">
               <span>PPE</span>
               <PpeList items={chemical.personalProtectiveEquipment} iconsOnly />
             </div>
@@ -182,7 +182,7 @@ export function EmergencyView() {
 
         {/* Hotlines + designated contacts — big tap targets */}
         <section className="rounded-2xl border border-white/15 bg-white/95 p-5 backdrop-blur-sm">
-          <h2 className="mb-3.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-muted-foreground">
+          <h2 className="mb-3.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.2em] text-gray-500">
             <Phone className="h-4 w-4 text-mirdc-cyan" />
             Emergency Contacts
           </h2>
@@ -194,8 +194,8 @@ export function EmergencyView() {
                 className="group flex items-center justify-between gap-3 rounded-xl border border-mirdc-cyan/30 bg-mirdc-cyan/5 p-3 transition-colors hover:bg-mirdc-cyan/10"
               >
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold">{c.role}</div>
-                  <div className="text-xs text-muted-foreground">{c.name}</div>
+                  <div className="text-sm font-semibold text-gray-900">{c.role}</div>
+                  <div className="text-xs text-gray-500">{c.name}</div>
                 </div>
                 <span className="flex items-center gap-2 font-mono text-sm font-bold text-mirdc-cyan">
                   {c.phone}
@@ -204,15 +204,15 @@ export function EmergencyView() {
               </a>
             ))}
 
-            <div className="space-y-1.5 border-t border-border/50 pt-2.5">
+            <div className="space-y-1.5 border-t border-gray-200 pt-2.5">
               {EMERGENCY_CONTACTS.map((c) => (
                 <div
                   key={c.role}
                   className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5"
                 >
-                  <span className="text-sm">
+                  <span className="text-sm text-gray-900">
                     <span className="font-semibold">{c.role}</span>
-                    <span className="text-muted-foreground"> — {c.name}</span>
+                    <span className="text-gray-500"> — {c.name}</span>
                   </span>
                   {c.phone ? (
                     <a
@@ -222,7 +222,7 @@ export function EmergencyView() {
                       {c.phone}
                     </a>
                   ) : (
-                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <span className="text-[10px] uppercase tracking-wide text-gray-400">
                       internal line
                     </span>
                   )}
@@ -294,7 +294,7 @@ function EmergencyProcedure({
         <h2 className="text-lg font-bold text-white">{title}</h2>
       </header>
       <div className="p-5">
-        <p className="whitespace-pre-line text-sm leading-relaxed text-foreground sm:text-base">
+        <p className="whitespace-pre-line text-sm leading-relaxed text-gray-900 sm:text-base">
           {content}
         </p>
       </div>

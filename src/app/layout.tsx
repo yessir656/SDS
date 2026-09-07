@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "@/components/common/theme-provider";
 import { ServiceWorkerRegister } from "@/components/common/service-worker-register";
+import { CookieConsent } from "@/components/common/cookie-consent";
 
 // Flat design system: Outfit — geometric sans mirroring the UI's shapes.
 const outfit = Outfit({
@@ -88,6 +89,7 @@ export default function RootLayout({
           <Toaster />
         </ThemeProvider>
         <ServiceWorkerRegister />
+        <CookieConsent />
       </body>
     </html>
   );

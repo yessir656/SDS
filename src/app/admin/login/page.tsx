@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import Link from "next/link";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -21,6 +23,7 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [consent, setConsent] = useState(false);
 
   // If the user is already authenticated, skip the login form and send them
   // straight to the dashboard. Previously, an authed admin visiting /admin/login
@@ -33,6 +36,7 @@ export default function AdminLoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!consent) return;
     setLoading(true);
     setError(null);
 
@@ -119,6 +123,36 @@ export default function AdminLoginPage() {
               />
             </div>
 
+            <div className="flex items-start gap-2.5">
+              <Checkbox
+                id="consent"
+                checked={consent}
+                onCheckedChange={(checked) => setConsent(!!checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 border-border"
+              />
+              <Label htmlFor="consent" className="text-xs leading-tight text-muted-foreground">
+                I have read and agree to the{" "}
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-mirdc-cyan underline decoration-mirdc-cyan/30 hover:text-mirdc-cyan/80"
+                >
+                  Terms &amp; Conditions
+                </Link>{" "}
+                and{" "}
+                <Link
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-mirdc-cyan underline decoration-mirdc-cyan/30 hover:text-mirdc-cyan/80"
+                >
+                  Privacy Policy
+                </Link>
+                , and acknowledge that only essential login cookies are used.
+              </Label>
+            </div>
+
             {error && (
               <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
                 {error}
@@ -127,7 +161,7 @@ export default function AdminLoginPage() {
 
             <Button
               type="submit"
-              disabled={loading}
+              disabled={loading || !consent}
               className="h-12 w-full gap-2 text-base"
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
