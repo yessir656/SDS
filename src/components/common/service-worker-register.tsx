@@ -11,8 +11,16 @@ export function ServiceWorkerRegister() {
   useEffect(() => {
     if (
       typeof window === "undefined" ||
-      !("serviceWorker" in navigator) ||
-      process.env.NODE_ENV !== "production"
+      !("serviceWorker" in navigator)
+    ) {
+      return;
+    }
+
+    // In development, only register the SW when accessed over HTTPS (e.g. via
+    // ngrok / localtunnel) so PWA install works on phones during dev.
+    if (
+      process.env.NODE_ENV !== "production" &&
+      window.location.protocol !== "https:"
     ) {
       return;
     }

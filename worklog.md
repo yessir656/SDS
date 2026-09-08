@@ -1122,3 +1122,46 @@ Work Log:
 Stage Summary:
 - Legal/compliance surface shipped: policies + cookie-consent banner + login form consent, all in the flat design system, server live on :3000.
 - Files changed: src/components/common/cookie-consent.tsx (new), src/components/common/legal-page.tsx (new), src/app/privacy/page.tsx (new), src/app/terms/page.tsx (new), src/app/cookie-policy/page.tsx (new), src/app/layout.tsx, src/components/layout/app-footer.tsx, src/app/admin/login/page.tsx.
+
+---
+Task ID: DARKMODE-FIX-1
+Agent: Orchestrator (ZCode, user's local Windows PC)
+Task: Fix dark mode text visibility in emergency view + set up localtunnel for mobile PWA installation.
+
+Work Log:
+
+Dark mode fix (emergency-view.tsx):
+- Root cause: several emergency view sections used `bg-white/95` (always white background) but relied on `text-foreground` / `text-muted-foreground` for text color. In dark mode, these resolve to white/light colors → white text on white background = invisible.
+- Also found: Emergency Contact section had `bg-red-50/95` (always light pink) with `dark:text-red-100` (very light) in dark mode → light text on light background = invisible.
+- Also found: Required PPE section had `dark:border-navy-700` and `dark:text-navy-300` on `bg-white/95` → low contrast.
+- Also found: GHS Pictogram containers used `bg-card` (dark in dark mode) inside a white section → dark chip on white background.
+- Fixes applied (all hardcoded dark colors since backgrounds are always light):
+  * GHS Pictogram labels: `text-foreground` → `text-gray-900`
+  * GHS Pictogram containers: `bg-card border-red-100` → `bg-gray-50 border-gray-200`
+  * EmergencyProcedure content: `text-foreground` → `text-gray-900`
+  * Hotlines heading: `text-muted-foreground` → `text-gray-500`
+  * Hotlines role text: default → `text-gray-900`
+  * Hotlines name text: `text-muted-foreground` → `text-gray-500`
+  * Contacts divider: `border-border/50` → `border-gray-200`
+  * Contacts role text: default → `text-gray-900`
+  * "internal line" text: `text-muted-foreground` → `text-gray-400`
+  * Emergency Contact phone: removed `dark:text-red-100` (kept `text-red-900`)
+  * Emergency Contact PPE label: removed `dark:text-red-300/80` (kept `text-red-700/80`)
+  * Required PPE heading: removed `dark:text-navy-300`, `dark:border-navy-700`, `dark:text-navy-300` (kept dark navy for white bg)
+- All sections verified: text is now dark on the always-light backgrounds regardless of theme.
+- tsc --noEmit clean (only pre-existing mock-typing error in sync-engine.test.ts).
+
+Localtunnel setup (mobile PWA installation):
+- User reported: "when i try to run it in my phone it is only giving me a short cut and not installing the pwa" — PWA install requires HTTPS.
+- ngrok blocked by Windows Defender (flagged as potentially unwanted software). Installed `localtunnel` via npm as a pure-JS alternative.
+- Service worker registration was PRODUCTION-ONLY (service-worker-register.tsx line 15: `process.env.NODE_ENV !== "production"` → return). In dev mode, no SW registers → no PWA install prompt.
+- Fix: changed the guard to allow registration in dev mode when accessed over HTTPS (ngrok/localtunnel). The new check: skip only when NODE_ENV !== "production" AND protocol is NOT "https:".
+- Started dev server on :3000 + localtunnel tunnel: `lt --port 3000`.
+- Tunnel URL: https://tricky-knives-write.loca.lt (free tier, shows a "Click to Continue" page on first visit — user clicks through once, then PWA loads with HTTPS).
+- IMPORTANT: localtunnel free tier generates a new random URL each session. For persistent URLs, the user should run `lt --port 3000` locally and share the URL with their workmate.
+- The service worker now registers over the HTTPS tunnel, enabling proper PWA installation on mobile (Safari "Add to Home Screen" → installed app with DOST-MIRDC logo icon).
+
+Stage Summary:
+- Emergency view text is now visible in dark mode across all sections (hardcoded dark colors on always-light backgrounds).
+- PWA can be installed on phones via localtunnel HTTPS tunnel: run `npm run dev` + `lt --port 3000`, open the URL on phone, click through the localtunnel notice page, then use browser "Add to Home Screen" to install.
+- Files changed: src/components/common/service-worker-register.tsx (HTTPS-aware dev-mode SW registration), src/components/emergency/emergency-view.tsx (dark mode text fixes).
