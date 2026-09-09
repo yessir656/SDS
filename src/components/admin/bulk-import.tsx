@@ -22,9 +22,9 @@
 // chemical + SDS upload lands in the audit log automatically.
 // ============================================================================
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { generateChemicalId } from "@/lib/slug";
-import { Files, Loader2, X } from "lucide-react";
+import { Files, Loader2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +53,8 @@ interface ResultRow {
   method?: string;
   chemicalId?: string;
   error?: string;
+  /** True while a per-row "Retry with AI" is running for this row. */
+  retrying?: boolean;
 }
 
 const STATUS_LABELS: Record<RowStatus, string> = {
@@ -80,6 +82,51 @@ function slugifyId(rawName: string, manufacturer?: string): string {
   return fromFile || "chemical";
 }
 
+/** Map extracted fields onto the API payload shape — shared by the create
+ *  path and the per-row Retry-with-AI update path. The create path adds `id`. */
+function buildFieldsPayload(
+  d: Record<string, unknown>,
+  baseName: string,
+  department: string
+) {
+  return {
+    chemicalName: baseName.slice(0, 200),
+    casNumber:
+      (typeof d.casNumber === "string" && d.casNumber.trim()) || "Not provided",
+    formula:
+      (typeof d.formula === "string" && d.formula.trim().slice(0, 100)) ||
+      "Not provided",
+    tradeName: typeof d.tradeName === "string" ? d.tradeName.trim() : "",
+    manufacturer: typeof d.manufacturer === "string" ? d.manufacturer.trim() : "",
+    supplier: typeof d.supplier === "string" ? d.supplier.trim() : "",
+    signalWord: d.signalWord === "warning" ? "warning" : "danger",
+    hazardClasses: Array.isArray(d.hazardClasses) ? d.hazardClasses : [],
+    ghsPictograms: Array.isArray(d.ghsPictograms) ? d.ghsPictograms : [],
+    storageLocation:
+      typeof d.storageLocation === "string" ? d.storageLocation : "",
+    department,
+    safetyInstructions:
+      typeof d.safetyInstructions === "string" ? d.safetyInstructions : "",
+    version: "1.0",
+    emergencyContact:
+      typeof d.emergencyContact === "string" ? d.emergencyContact : "",
+    personalProtectiveEquipment: Array.isArray(
+      d.personalProtectiveEquipment
+    )
+      ? d.personalProtectiveEquipment
+      : [],
+    regulatoryTags: [],
+    firstAidMeasures:
+      typeof d.firstAidMeasures === "string" ? d.firstAidMeasures : "",
+    firefightingMeasures:
+      typeof d.firefightingMeasures === "string" ? d.firefightingMeasures : "",
+    accidentalReleaseMeasures:
+      typeof d.accidentalReleaseMeasures === "string"
+        ? d.accidentalReleaseMeasures
+        : "",
+  };
+}
+
 export function BulkImportDialog({
   open,
   onOpenChange,
@@ -94,22 +141,35 @@ export function BulkImportDialog({
   const [department, setDepartment] = useState<string>("Chemical Analysis");
   const [running, setRunning] = useState(false);
   const [rows, setRows] = useState<ResultRow[]>([]);
-  const [summary, setSummary] = useState<{
-    created: number;
-    skipped: number;
-    failed: number;
-  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // CAS numbers already in the catalog — preloaded when the dialog opens.
   const existingCasRef = useRef<Set<string>>(new Set());
+
+  // Summary is derived from the rows (not incremental counters) so per-row
+  // "Retry with AI" keeps the numbers accurate. Shown once every row is done.
+  const summary = useMemo(() => {
+    if (rows.length === 0) return null;
+    const allDone = rows.every((r) =>
+      ["created", "partial", "duplicate", "failed"].includes(r.status)
+    );
+    if (!allDone) return null;
+    return {
+      created: rows.filter(
+        (r) => r.status === "created" || r.status === "partial"
+      ).length,
+      skipped: rows.filter((r) => r.status === "duplicate").length,
+      failed: rows.filter((r) => r.status === "failed").length,
+    };
+  }, [rows]);
+
+  const anyRetrying = rows.some((r) => r.retrying);
 
   // Preload existing CAS numbers each time the dialog opens.
   useEffect(() => {
     if (!open) return;
     setFiles([]);
     setRows([]);
-    setSummary(null);
     setError(null);
     (async () => {
       try {
@@ -133,124 +193,207 @@ export function BulkImportDialog({
     );
   };
 
+  /** Run the full per-file pipeline (extract → duplicate check → create →
+   *  attach the real SDS PDF) for one file, updating its row live. Returns
+   *  the row's final status. forceAI=true skips the free local tiers and
+   *  goes straight to the vision model (the "Retry with AI" path). */
+  const processFile = async (
+    index: number,
+    forceAI: boolean
+  ): Promise<RowStatus> => {
+    const file = files[index];
+
+    // ---- Step 1: tiered extraction ---------------------------------------
+    updateRow(index, { status: "extracting", error: undefined });
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (forceAI) fd.append("forceAI", "true");
+      const exRes = await fetch("/api/admin/sds/extract", {
+        method: "POST",
+        body: fd,
+      });
+      const exJson = await exRes.json().catch(() => null);
+      if (!exRes.ok || !exJson?.success) {
+        throw new Error(exJson?.error || `Extraction failed (HTTP ${exRes.status})`);
+      }
+      const d = exJson.data as Record<string, unknown>;
+      updateRow(index, { method: String(exJson.method ?? "ai") });
+
+      // ---- Duplicate check by CAS ---------------------------------------
+      const cas = typeof d.casNumber === "string" ? d.casNumber.trim() : "";
+      if (cas && existingCasRef.current.has(cas)) {
+        updateRow(index, { status: "duplicate" });
+        return "duplicate";
+      }
+
+      // ---- Step 2: create the chemical ----------------------------------
+      updateRow(index, { status: "creating" });
+      const baseName =
+        (typeof d.chemicalName === "string" && d.chemicalName.trim()) ||
+        file.name.replace(/\.pdf$/i, "");
+
+      const payload = {
+        id: "", // filled below with dedupe retry
+        ...buildFieldsPayload(d, baseName, department),
+      };
+
+      let finalId = "";
+      let createRes: Response | null = null;
+      let createJson: { error?: string } | null = null;
+      const base = slugifyId(
+        baseName,
+        typeof payload.manufacturer === "string" && payload.manufacturer
+          ? payload.manufacturer
+          : undefined
+      );
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const candidate = attempt === 1 ? base : `${base}-${attempt}`;
+        payload.id = candidate;
+        const r = await fetch("/api/admin/chemicals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (r.status === 409) continue; // id collision → next suffix
+        createRes = r;
+        break;
+      }
+
+      if (!createRes || !createRes.ok) {
+        createJson = createRes
+          ? await createRes.json().catch(() => null)
+          : null;
+        throw new Error(
+          createJson?.error ||
+            `Create failed${createRes ? ` (HTTP ${createRes.status})` : " — ID collisions"}`
+        );
+      }
+
+      finalId = payload.id as string;
+      existingCasRef.current.add(cas || `id:${finalId}`);
+
+      // ---- Step 3: attach the REAL uploaded PDF as its SDS ---------------
+      let attachError: string | null = null;
+      try {
+        const sfd = new FormData();
+        sfd.append("file", file);
+        sfd.append("chemicalId", finalId);
+        const sdsRes = await fetch("/api/admin/sds", {
+          method: "POST",
+          body: sfd,
+        });
+        if (!sdsRes.ok) {
+          const sj = await sdsRes.json().catch(() => null);
+          attachError = sj?.error || `HTTP ${sdsRes.status}`;
+        }
+      } catch (e) {
+        attachError = e instanceof Error ? e.message : String(e);
+      }
+
+      if (attachError) {
+        updateRow(index, {
+          status: "partial",
+          chemicalId: finalId,
+          error: attachError,
+        });
+        return "partial";
+      }
+      updateRow(index, { status: "created", chemicalId: finalId });
+      return "created";
+    } catch (err) {
+      updateRow(index, {
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return "failed";
+    }
+  };
+
   const runBatch = async () => {
     if (files.length === 0 || running) return;
     setRunning(true);
     setError(null);
 
-    let created = 0;
-    let skipped = 0;
-    let failed = 0;
-
+    let failedCount = 0;
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+      const status = await processFile(i, false);
+      if (status === "failed") failedCount++;
+    }
 
-      // ---- Step 1: tiered extraction -------------------------------------
-      updateRow(i, { status: "extracting", error: undefined });
+    setRunning(false);
+    if (failedCount > 0) {
+      setError(
+        `${failedCount} of ${files.length} file(s) failed — see rows below. Individual rows can be retried with AI.`
+      );
+    }
+    onImported();
+  };
+
+  /** Per-row "Retry with AI".
+   *  • failed rows: re-run the whole pipeline, forced through the AI tier.
+   *  • created/partial rows: re-extract with AI and UPDATE the existing
+   *    chemical (no duplicate). For partial rows the SDS attach is retried
+   *    too, since the originally selected file is still available. */
+  const retryRowWithAi = async (index: number) => {
+    const row = rows[index];
+    const file = files[index];
+    if (!row || !file || row.retrying || running) return;
+
+    if (row.status === "failed") {
+      updateRow(index, { retrying: true, error: undefined });
       try {
-        const fd = new FormData();
-        fd.append("file", file);
-        const exRes = await fetch("/api/admin/sds/extract", {
-          method: "POST",
-          body: fd,
-        });
-        const exJson = await exRes.json().catch(() => null);
-        if (!exRes.ok || !exJson?.success) {
-          throw new Error(exJson?.error || `Extraction failed (HTTP ${exRes.status})`);
-        }
-        const d = exJson.data as Record<string, unknown>;
-        updateRow(i, { method: String(exJson.method ?? "ai") });
+        await processFile(index, true);
+      } finally {
+        updateRow(index, { retrying: false });
+      }
+      return;
+    }
 
-        // ---- Duplicate check by CAS ---------------------------------------
-        const cas = typeof d.casNumber === "string" ? d.casNumber.trim() : "";
-        if (cas && existingCasRef.current.has(cas)) {
-          updateRow(i, { status: "duplicate" });
-          skipped++;
-          continue;
-        }
+    if (!row.chemicalId) return;
+    const originalStatus = row.status;
+    updateRow(index, {
+      retrying: true,
+      error: undefined,
+      status: "extracting",
+    });
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("forceAI", "true");
+      const exRes = await fetch("/api/admin/sds/extract", {
+        method: "POST",
+        body: fd,
+      });
+      const exJson = await exRes.json().catch(() => null);
+      if (!exRes.ok || !exJson?.success) {
+        throw new Error(
+          exJson?.error || `Extraction failed (HTTP ${exRes.status})`
+        );
+      }
+      const d = exJson.data as Record<string, unknown>;
+      const baseName =
+        (typeof d.chemicalName === "string" && d.chemicalName.trim()) ||
+        file.name.replace(/\.pdf$/i, "");
 
-        // ---- Step 2: create the chemical ----------------------------------
-        updateRow(i, { status: "creating" });
-        const baseName =
-          (typeof d.chemicalName === "string" && d.chemicalName.trim()) ||
-          file.name.replace(/\.pdf$/i, "");
+      const res = await fetch(`/api/admin/chemicals/${row.chemicalId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildFieldsPayload(d, baseName, department)),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        throw new Error(j?.error || `Update failed (HTTP ${res.status})`);
+      }
 
-        const payload = {
-          id: "", // filled below with dedupe retry
-          chemicalName: baseName.slice(0, 200),
-          casNumber: cas || "Not provided",
-          formula:
-            (typeof d.formula === "string" && d.formula.trim().slice(0, 100)) ||
-            "Not provided",
-          tradeName: typeof d.tradeName === "string" ? d.tradeName.trim() : "",
-          manufacturer:
-            typeof d.manufacturer === "string" ? d.manufacturer.trim() : "",
-          supplier: typeof d.supplier === "string" ? d.supplier.trim() : "",
-          signalWord: d.signalWord === "warning" ? "warning" : "danger",
-          hazardClasses: Array.isArray(d.hazardClasses) ? d.hazardClasses : [],
-          ghsPictograms: Array.isArray(d.ghsPictograms) ? d.ghsPictograms : [],
-          storageLocation:
-            typeof d.storageLocation === "string" ? d.storageLocation : "",
-          department,
-          safetyInstructions:
-            typeof d.safetyInstructions === "string" ? d.safetyInstructions : "",
-          version: "1.0",
-          emergencyContact:
-            typeof d.emergencyContact === "string" ? d.emergencyContact : "",
-          personalProtectiveEquipment: Array.isArray(
-            d.personalProtectiveEquipment
-          )
-            ? d.personalProtectiveEquipment
-            : [],
-          regulatoryTags: [],
-          firstAidMeasures:
-            typeof d.firstAidMeasures === "string" ? d.firstAidMeasures : "",
-          firefightingMeasures:
-            typeof d.firefightingMeasures === "string"
-              ? d.firefightingMeasures
-              : "",
-          accidentalReleaseMeasures:
-            typeof d.accidentalReleaseMeasures === "string"
-              ? d.accidentalReleaseMeasures
-              : "",
-        };
-
-        let finalId = "";
-        let createRes: Response | null = null;
-        let createJson: { error?: string } | null = null;
-        const base = slugifyId(baseName, payload.manufacturer || undefined);
-        for (let attempt = 1; attempt <= 5; attempt++) {
-          const candidate = attempt === 1 ? base : `${base}-${attempt}`;
-          payload.id = candidate;
-          const r = await fetch("/api/admin/chemicals", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          if (r.status === 409) continue; // id collision → next suffix
-          createRes = r;
-          break;
-        }
-
-        if (!createRes || !createRes.ok) {
-          createJson = createRes
-            ? await createRes.json().catch(() => null)
-            : null;
-          throw new Error(
-            createJson?.error ||
-              `Create failed${createRes ? ` (HTTP ${createRes.status})` : " — ID collisions"}`
-          );
-        }
-
-        finalId = payload.id;
-        existingCasRef.current.add(cas || `id:${finalId}`);
-
-        // ---- Step 3: attach the REAL uploaded PDF as its SDS ---------------
-        let attachError: string | null = null;
+      // A partial row's SDS attach failed earlier — retry it with the file
+      // we still have.
+      let attachError: string | null = null;
+      if (originalStatus === "partial") {
         try {
           const sfd = new FormData();
           sfd.append("file", file);
-          sfd.append("chemicalId", finalId);
+          sfd.append("chemicalId", row.chemicalId);
           const sdsRes = await fetch("/api/admin/sds", {
             method: "POST",
             body: sfd,
@@ -262,32 +405,24 @@ export function BulkImportDialog({
         } catch (e) {
           attachError = e instanceof Error ? e.message : String(e);
         }
-
-        if (attachError) {
-          updateRow(i, {
-            status: "partial",
-            chemicalId: finalId,
-            error: attachError,
-          });
-        } else {
-          updateRow(i, { status: "created", chemicalId: finalId });
-        }
-        created++;
-      } catch (err) {
-        updateRow(i, {
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-        });
-        failed++;
       }
-    }
 
-    setRunning(false);
-    if (failed > 0) {
-      setError(`${failed} of ${files.length} file(s) failed — see rows below.`);
+      updateRow(index, {
+        method: String(exJson.method ?? "ai"),
+        status:
+          originalStatus === "partial" && attachError
+            ? "partial"
+            : "created",
+        error: attachError ?? undefined,
+        retrying: false,
+      });
+    } catch (err) {
+      updateRow(index, {
+        status: originalStatus,
+        error: err instanceof Error ? err.message : String(err),
+        retrying: false,
+      });
     }
-    setSummary({ created, skipped, failed });
-    onImported();
   };
 
   const doneCount = rows.filter((r) =>
@@ -295,7 +430,10 @@ export function BulkImportDialog({
   ).length;
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !running && onOpenChange(o)}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => !running && !anyRetrying && onOpenChange(o)}
+    >
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -360,45 +498,78 @@ export function BulkImportDialog({
           {/* Progress list */}
           {rows.length > 0 && (
             <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
-              {rows.map((r, i) => (
-                <div
-                  key={`${r.fileName}-${i}`}
-                  className="flex items-center gap-2 text-xs"
-                >
-                  <span className="min-w-0 flex-1 truncate" title={r.fileName}>
-                    {r.fileName}
-                  </span>
-                  {r.method && (
-                    <Badge variant="outline" className="shrink-0 text-[9px]">
-                      {r.method}
-                    </Badge>
-                  )}
-                  <span
-                    className={
-                      "shrink-0 font-medium " +
-                      (r.status === "created"
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : r.status === "failed" || r.status === "partial"
-                          ? "text-red-600 dark:text-red-400"
-                          : r.status === "duplicate"
-                            ? "text-amber-600 dark:text-amber-400"
-                            : "text-muted-foreground")
-                    }
+              {rows.map((r, i) => {
+                const canRetry =
+                  !running &&
+                  !r.retrying &&
+                  (r.status === "failed" ||
+                    ((r.status === "created" || r.status === "partial") &&
+                      !!r.chemicalId &&
+                      r.method !== "ai"));
+                return (
+                  <div
+                    key={`${r.fileName}-${i}`}
+                    className="flex items-center gap-2 text-xs"
                   >
-                    {(r.status === "extracting" || r.status === "creating") && (
-                      <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                    <span className="min-w-0 flex-1 truncate" title={r.fileName}>
+                      {r.fileName}
+                    </span>
+                    {r.method && (
+                      <Badge variant="outline" className="shrink-0 text-[9px]">
+                        {r.method}
+                      </Badge>
                     )}
-                    {STATUS_LABELS[r.status]}
-                    {r.chemicalId ? ` · ${r.chemicalId}` : ""}
-                    {r.error ? ` — ${r.error}` : ""}
-                  </span>
-                </div>
-              ))}
+                    <span
+                      className={
+                        "shrink-0 font-medium " +
+                        (r.status === "created"
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : r.status === "failed" || r.status === "partial"
+                            ? "text-red-600 dark:text-red-400"
+                            : r.status === "duplicate"
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-muted-foreground")
+                      }
+                    >
+                      {(r.status === "extracting" || r.status === "creating") && (
+                        <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                      )}
+                      {STATUS_LABELS[r.status]}
+                      {r.chemicalId ? ` · ${r.chemicalId}` : ""}
+                      {r.error ? ` — ${r.error}` : ""}
+                    </span>
+                    {canRetry && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 shrink-0 gap-1 px-1.5 text-[10px]"
+                        onClick={() => retryRowWithAi(i)}
+                        disabled={anyRetrying}
+                        title={
+                          r.status === "failed"
+                            ? "Re-run this file through the AI extraction and import it"
+                            : "Re-read this file with AI and update the imported chemical"
+                        }
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Retry with AI
+                      </Button>
+                    )}
+                    {r.retrying && (
+                      <span className="shrink-0 font-medium text-violet-700 dark:text-violet-300">
+                        <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                        Retrying with AI…
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
           {/* Batch summary */}
-          {summary && !running && (
+          {summary && !running && !anyRetrying && (
             <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
               Done: {summary.created} imported
               {summary.skipped > 0 ? `, ${summary.skipped} skipped (duplicate CAS)` : ""}
@@ -418,9 +589,13 @@ export function BulkImportDialog({
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={running}
+              disabled={running || anyRetrying}
             >
-              {running ? "Importing…" : doneCount > 0 ? "Close" : "Cancel"}
+              {running || anyRetrying
+                ? "Importing…"
+                : doneCount > 0
+                  ? "Close"
+                  : "Cancel"}
             </Button>
             <Button
               onClick={runBatch}

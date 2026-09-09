@@ -64,6 +64,15 @@ import {
 } from "@/types";
 import type { Department, SignalWord, HazardClass, GhsPictogram } from "@/types";
 import { generateChemicalId } from "@/lib/slug";
+import {
+  clearChemicalDraft,
+  clearDraftPdf,
+  loadChemicalDraft,
+  loadDraftPdf,
+  saveChemicalDraft,
+  saveDraftPdf,
+} from "@/lib/draft-storage";
+import type { ExtractMethod } from "@/lib/sds-extract";
 
 interface AdminChemical {
   id: string;
@@ -95,7 +104,7 @@ interface AdminChemical {
 
 // Extraction pipeline methods returned by /api/admin/sds/extract.
 // "embedded-text" and "ocr" run free + offline locally; "ai" consumed quota.
-type ExtractMethod = "embedded-text" | "ocr" | "ai";
+// The union is imported from the shared pipeline lib (type-only import).
 
 const EXTRACT_METHOD_LABELS: Record<ExtractMethod, string> = {
   "embedded-text": "Embedded text · free & offline",
@@ -351,6 +360,28 @@ interface FormState {
   accidentalReleaseMeasures: string;
 }
 
+// Shape of the `data` payload returned by the extraction endpoints
+// (/api/admin/sds/extract and /api/admin/sds/reextract). All fields optional —
+// empty results never overwrite existing form values.
+type ExtractedData = {
+  chemicalName?: string;
+  casNumber?: string;
+  formula?: string;
+  tradeName?: string;
+  manufacturer?: string;
+  supplier?: string;
+  signalWord?: SignalWord;
+  ghsPictograms?: GhsPictogram[];
+  hazardClasses?: HazardClass[];
+  storageLocation?: string;
+  safetyInstructions?: string;
+  emergencyContact?: string;
+  personalProtectiveEquipment?: string[];
+  firstAidMeasures?: string;
+  firefightingMeasures?: string;
+  accidentalReleaseMeasures?: string;
+};
+
 function ChemicalFormDialog({
   chemical,
   onClose,
@@ -396,6 +427,11 @@ function ChemicalFormDialog({
   const [extractMethod, setExtractMethod] = useState<ExtractMethod | null>(null);
   const [extractNotice, setExtractNotice] = useState<string | null>(null);
   const [extractLabel, setExtractLabel] = useState("Reading SDS document…");
+  // True while the edit-mode "Retry with AI on attached PDF" is in flight.
+  const [storedReextracting, setStoredReextracting] = useState(false);
+  // Create-mode draft persistence — see src/lib/draft-storage.ts. Set when a
+  // previously-lost session's work was restored on open.
+  const [draftRestored, setDraftRestored] = useState(false);
   const lastFileRef = useRef<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -443,6 +479,61 @@ function ChemicalFormDialog({
   );
 
   // ---------------------------------------------------------------------------
+  // Shared auto-fill helpers — used by BOTH the uploaded-PDF pipeline and the
+  // edit-mode stored-PDF AI re-extract, so results merge identically.
+  // ---------------------------------------------------------------------------
+
+  /** Merge extracted fields into the form. Empty results never overwrite
+   *  existing values. Marks the form dirty so the discard-confirm guards the
+   *  auto-filled data too (programmatic updates don't fire DOM onChange). */
+  const applyExtracted = useCallback(
+    (d: ExtractedData) => {
+      updateForm((prev) => ({
+        chemicalName: d.chemicalName || prev.chemicalName,
+        casNumber: d.casNumber || prev.casNumber,
+        formula: d.formula || prev.formula,
+        tradeName: d.tradeName || prev.tradeName,
+        manufacturer: d.manufacturer || prev.manufacturer,
+        supplier: d.supplier || prev.supplier,
+        signalWord: d.signalWord || prev.signalWord,
+        ghsPictograms:
+          Array.isArray(d.ghsPictograms) && d.ghsPictograms.length > 0
+            ? d.ghsPictograms
+            : prev.ghsPictograms,
+        hazardClasses:
+          Array.isArray(d.hazardClasses) && d.hazardClasses.length > 0
+            ? d.hazardClasses
+            : prev.hazardClasses,
+        storageLocation: d.storageLocation || prev.storageLocation,
+        safetyInstructions: d.safetyInstructions || prev.safetyInstructions,
+        emergencyContact: d.emergencyContact || prev.emergencyContact,
+        // PPE comes back as an array; join with newlines for the textarea.
+        personalProtectiveEquipment:
+          Array.isArray(d.personalProtectiveEquipment) && d.personalProtectiveEquipment.length > 0
+            ? d.personalProtectiveEquipment.join("\n")
+            : prev.personalProtectiveEquipment,
+        firstAidMeasures: d.firstAidMeasures || prev.firstAidMeasures,
+        firefightingMeasures: d.firefightingMeasures || prev.firefightingMeasures,
+        accidentalReleaseMeasures:
+          d.accidentalReleaseMeasures || prev.accidentalReleaseMeasures,
+      }));
+      dirtyRef.current = true;
+    },
+    [updateForm]
+  );
+
+  /** Record which pipeline produced the result so the UI can badge it and
+   *  offer "Retry with AI" for free-tier results. */
+  const recordExtractMeta = useCallback(
+    (method: ExtractMethod | null, notice: string | null) => {
+      setExtractMethod(method);
+      setExtractNotice(notice);
+      setExtractedFromPdf(true);
+    },
+    []
+  );
+
+  // ---------------------------------------------------------------------------
   // Auto-fill extraction — runs the tiered pipeline on the selected PDF.
   // Default (forceAI=false): free local tiers (embedded text → OCR), AI only
   // fires server-side if those come back empty/garbage. forceAI=true is the
@@ -473,68 +564,22 @@ function ChemicalFormDialog({
         throw new Error(json.error || `Extraction failed (HTTP ${res.status})`);
       }
 
-      const d = json.data as {
-        chemicalName?: string;
-        casNumber?: string;
-        formula?: string;
-        tradeName?: string;
-        manufacturer?: string;
-        supplier?: string;
-        signalWord?: SignalWord;
-        ghsPictograms?: GhsPictogram[];
-        hazardClasses?: HazardClass[];
-        storageLocation?: string;
-        safetyInstructions?: string;
-        emergencyContact?: string;
-        personalProtectiveEquipment?: string[];
-        firstAidMeasures?: string;
-        firefightingMeasures?: string;
-        accidentalReleaseMeasures?: string;
-      };
+      const d = json.data as ExtractedData;
 
-      // Build the next form state from the extracted fields, then let
-      // updateForm() auto-generate the ID from the new name + manufacturer
-      // (in create mode, only if the admin hadn't typed a custom ID).
-      updateForm((prev) => ({
-        chemicalName: d.chemicalName || prev.chemicalName,
-        casNumber: d.casNumber || prev.casNumber,
-        formula: d.formula || prev.formula,
-        tradeName: d.tradeName || prev.tradeName,
-        manufacturer: d.manufacturer || prev.manufacturer,
-        supplier: d.supplier || prev.supplier,
-        signalWord: d.signalWord || prev.signalWord,
-        ghsPictograms:
-          Array.isArray(d.ghsPictograms) && d.ghsPictograms.length > 0
-            ? d.ghsPictograms
-            : prev.ghsPictograms,
-        hazardClasses:
-          Array.isArray(d.hazardClasses) && d.hazardClasses.length > 0
-            ? d.hazardClasses
-            : prev.hazardClasses,
-        storageLocation: d.storageLocation || prev.storageLocation,
-        safetyInstructions: d.safetyInstructions || prev.safetyInstructions,
-        emergencyContact: d.emergencyContact || prev.emergencyContact,
-        // PPE comes back as an array; join with newlines for the textarea.
-        personalProtectiveEquipment:
-          Array.isArray(d.personalProtectiveEquipment) && d.personalProtectiveEquipment.length > 0
-            ? d.personalProtectiveEquipment.join("\n")
-            : prev.personalProtectiveEquipment,
-        firstAidMeasures: d.firstAidMeasures || prev.firstAidMeasures,
-        firefightingMeasures: d.firefightingMeasures || prev.firefightingMeasures,
-        accidentalReleaseMeasures:
-          d.accidentalReleaseMeasures || prev.accidentalReleaseMeasures,
-      }));
+      // Merge the extracted fields into the form (updateForm then
+      // auto-generates the ID from the new name + manufacturer in create
+      // mode, unless the admin had typed a custom ID).
+      applyExtracted(d);
 
       // Record which pipeline produced the result so the UI can badge it and
       // offer "Retry with AI" for free-tier results.
       const rawMethod = typeof json.method === "string" ? json.method : "";
-      setExtractMethod(
+      recordExtractMeta(
         rawMethod === "embedded-text" || rawMethod === "ocr" || rawMethod === "ai"
           ? (rawMethod as ExtractMethod)
-          : null
+          : null,
+        typeof json.notice === "string" && json.notice ? json.notice : null
       );
-      setExtractNotice(typeof json.notice === "string" && json.notice ? json.notice : null);
-      setExtractedFromPdf(true);
     } catch (err) {
       setExtractError(err instanceof Error ? err.message : "Auto-fill failed");
       setExtractedFromPdf(false);
@@ -550,14 +595,53 @@ function ChemicalFormDialog({
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (!file) return;
     lastFileRef.current = file;
+    // Persist the file so a restored draft can still Retry-with-AI and
+    // auto-attach the PDF on save (create mode; no-op in edit).
+    if (!isEdit) void saveDraftPdf(file);
     await runExtraction(file, false);
   };
 
   /** Escape hatch — re-run the same file through the vision AI provider. */
   const handleRetryWithAi = async () => {
     const file = lastFileRef.current;
-    if (!file || extracting) return;
+    if (!file || extracting || storedReextracting) return;
     await runExtraction(file, true);
+  };
+
+  /** Edit mode — re-run the vision AI on the SDS PDF already attached to this
+   *  chemical (stored server-side), so the admin doesn't need to re-upload
+   *  the same document. Read-only endpoint; saving still goes through PUT. */
+  const runStoredReextract = async () => {
+    if (!isEdit || storedReextracting || extracting || saving) return;
+    setStoredReextracting(true);
+    setExtractError(null);
+    setExtractLabel(
+      "Asking Gemini AI to re-read the attached SDS… (~10-15 seconds)"
+    );
+    try {
+      const res = await fetch("/api/admin/sds/reextract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chemicalId: form.id }),
+      });
+      const json = await res
+        .json()
+        .catch(() => ({ success: false, error: "Invalid response from server" }));
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || `Re-extract failed (HTTP ${res.status})`);
+      }
+      applyExtracted(json.data as ExtractedData);
+      recordExtractMeta(
+        "ai",
+        typeof json.notice === "string" && json.notice ? json.notice : null
+      );
+    } catch (err) {
+      setExtractError(
+        err instanceof Error ? err.message : "AI re-extract failed"
+      );
+    } finally {
+      setStoredReextracting(false);
+    }
   };
 
   // --- Unsaved-changes guard + Cmd/Ctrl+Enter to save -----------------------
@@ -589,13 +673,105 @@ function ChemicalFormDialog({
     dirtyRef.current = true;
   }, []);
 
+  // -------------------------------------------------------------------------
+  // Draft persistence (create mode) — the auto-filled work survives dialog
+  // closes and even full tab closes. Fields go to localStorage, the selected
+  // PDF goes to IndexedDB. Cleared on successful save or explicit discard.
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (isEdit) return;
+    const hasContent = Boolean(
+      form.chemicalName ||
+        form.casNumber ||
+        form.formula ||
+        form.tradeName ||
+        form.manufacturer ||
+        form.supplier ||
+        form.id
+    );
+    if (!hasContent && !extractedFromPdf) return;
+    saveChemicalDraft({
+      form: { ...form },
+      extractedFromPdf,
+      extractMethod,
+      extractNotice,
+      savedAt: Date.now(),
+    });
+  }, [form, extractedFromPdf, extractMethod, extractNotice, isEdit]);
+
+  // Restore a saved draft once on open (create mode only). Marking the form
+  // dirty ensures closing the dialog warns before throwing the work away.
+  useEffect(() => {
+    if (isEdit) return;
+    const draft = loadChemicalDraft();
+    if (!draft) return;
+    setForm((prev) => ({ ...prev, ...(draft.form as Partial<FormState>) }));
+    setExtractedFromPdf(draft.extractedFromPdf);
+    setExtractMethod((draft.extractMethod as ExtractMethod | null) ?? null);
+    setExtractNotice(draft.extractNotice);
+    dirtyRef.current = true;
+    setDraftRestored(true);
+    void loadDraftPdf().then((file) => {
+      if (file) lastFileRef.current = file;
+    });
+  }, []);
+
+  /** Discard the restored draft — clears storage and resets to a blank form. */
+  const handleDiscardDraft = () => {
+    clearChemicalDraft();
+    void clearDraftPdf();
+    lastFileRef.current = null;
+    setExtractedFromPdf(false);
+    setExtractMethod(null);
+    setExtractNotice(null);
+    setExtractError(null);
+    setForm({
+      id: "",
+      casNumber: "",
+      chemicalName: "",
+      formula: "",
+      tradeName: "",
+      manufacturer: "",
+      supplier: "",
+      signalWord: "danger",
+      hazardClasses: [],
+      ghsPictograms: [],
+      storageLocation: "",
+      department: "Chemical Analysis",
+      safetyInstructions: "",
+      version: "1.0",
+      emergencyContact: "",
+      personalProtectiveEquipment: "",
+      regulatoryTags: [],
+      firstAidMeasures: "",
+      firefightingMeasures: "",
+      accidentalReleaseMeasures: "",
+    });
+    dirtyRef.current = false;
+    setDraftRestored(false);
+  };
+
   const requestClose = useCallback(() => {
-    if (dirtyRef.current && !saving && !attachingPdf) {
+    // An in-flight extraction also holds unsaved work — the result would be
+    // lost on a silent close, so route through the confirm.
+    if ((dirtyRef.current || extracting) && !saving && !attachingPdf) {
       setShowDiscardConfirm(true);
     } else {
       onClose();
     }
-  }, [saving, attachingPdf, onClose]);
+  }, [extracting, saving, attachingPdf, onClose]);
+
+  // Warn before the whole tab closes/refreshes while extraction or save is
+  // in flight — the browser-level last line of defense.
+  useEffect(() => {
+    if (!extracting && !saving && !attachingPdf && !storedReextracting) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [extracting, saving, attachingPdf, storedReextracting]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -652,6 +828,11 @@ function ChemicalFormDialog({
         }
       }
 
+      // The chemical is saved — clear the create-mode draft so the next
+      // "Add Chemical" starts fresh.
+      clearChemicalDraft();
+      void clearDraftPdf();
+
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -690,6 +871,30 @@ function ChemicalFormDialog({
           onChange={handleAutoFill}
         />
 
+        {/* Draft-restored banner (create mode) — previous session's unsaved
+            work was recovered. */}
+        {draftRestored && !isEdit && (
+          <div className="flex items-start gap-2 rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="flex-1">
+              <div className="font-semibold">Draft restored</div>
+              <div className="mt-0.5">
+                We recovered your unsaved &quot;Add Chemical&quot; work from the previous
+                session{lastFileRef.current ? " — including the selected PDF, so Auto-fill / Retry with AI still work" : ""}.
+                Review the fields and save, or discard to start fresh.
+              </div>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded p-0.5 hover:bg-sky-100 dark:hover:bg-sky-900"
+              onClick={handleDiscardDraft}
+              aria-label="Discard restored draft"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         <form ref={formRef} onSubmit={handleSubmit} onChange={markDirty} className="space-y-4">
           {/* Auto-fill from PDF banner / button */}
           <div className="space-y-2 rounded-lg border border-navy-200 bg-navy-50/60 p-3 dark:border-navy-900 dark:bg-navy-950/40">
@@ -700,7 +905,7 @@ function ChemicalFormDialog({
                 size="sm"
                 className="gap-2 border-navy-400 text-navy-700 hover:bg-navy-100 dark:border-navy-800 dark:text-navy-300 dark:hover:bg-navy-900/40"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={extracting || saving}
+                disabled={extracting || storedReextracting || saving}
               >
                 {extracting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -709,13 +914,34 @@ function ChemicalFormDialog({
                 )}
                 {extracting ? "Reading SDS document…" : "Auto-fill from PDF"}
               </Button>
+              {/* Edit mode — re-run the AI on the PDF already stored for this
+                  chemical, no re-upload needed. */}
+              {isEdit && chemical?.sds?.status === "available" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 border-violet-400 text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-950/40"
+                  onClick={runStoredReextract}
+                  disabled={extracting || storedReextracting || saving}
+                >
+                  {storedReextracting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {storedReextracting
+                    ? "Re-reading attached PDF…"
+                    : "Retry with AI (attached PDF)"}
+                </Button>
+              )}
               <span className="text-xs text-muted-foreground">
                 Upload an SDS PDF — digital files extract instantly and free; scans run offline OCR. Gemini AI is only used as a fallback. The PDF itself is attached to this chemical when you save.
               </span>
             </div>
 
             {/* Loading state */}
-            {extracting && (
+            {(extracting || storedReextracting) && (
               <div className="flex items-center gap-2 text-xs text-navy-700 dark:text-navy-300">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 {extractLabel}
@@ -723,7 +949,7 @@ function ChemicalFormDialog({
             )}
 
             {/* Error banner */}
-            {extractError && !extracting && (
+            {extractError && !extracting && !storedReextracting && (
               <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="flex-1">
@@ -742,7 +968,7 @@ function ChemicalFormDialog({
             )}
 
             {/* Review banner — shows which pipeline ran + Retry-with-AI escape hatch */}
-            {extractedFromPdf && !extracting && (
+            {extractedFromPdf && !extracting && !storedReextracting && (
               <div className="flex items-start gap-2 rounded-md border border-navy-300 bg-navy-100/70 px-3 py-2 text-xs text-navy-800 dark:border-navy-700 dark:bg-navy-900/50 dark:text-navy-200">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="flex-1">
@@ -763,7 +989,9 @@ function ChemicalFormDialog({
                     )}
                   </div>
                   <div className="mt-0.5">Please review all fields carefully before saving — automated extraction may have errors or omissions.</div>
-                  <div className="mt-0.5">This PDF is attached as the SDS document when you save.</div>
+                  {lastFileRef.current && (
+                    <div className="mt-0.5">This PDF is attached as the SDS document when you save.</div>
+                  )}
                   {extractNotice && (
                     <div className="mt-1 text-amber-700 dark:text-amber-300">{extractNotice}</div>
                   )}
@@ -775,7 +1003,7 @@ function ChemicalFormDialog({
                     size="sm"
                     className="h-7 shrink-0 gap-1.5 px-2 text-[11px]"
                     onClick={handleRetryWithAi}
-                    disabled={extracting || saving}
+                    disabled={extracting || storedReextracting || saving}
                   >
                     <RefreshCw className="h-3 w-3" />
                     Retry with AI
@@ -1085,8 +1313,10 @@ function ChemicalFormDialog({
           <AlertDialogHeader>
             <AlertDialogTitle>Discard your changes?</AlertDialogTitle>
             <AlertDialogDescription>
-              You have unsaved edits to this chemical. Discarding will close
-              the form and lose your changes. This cannot be undone.
+              {extracting
+                ? "Auto-fill is still reading the SDS document. Closing now will lose the extraction result"
+                : "You have unsaved edits to this chemical, including any auto-filled PDF data. Discarding will close"}
+              {" the form and lose your changes. This cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1094,6 +1324,11 @@ function ChemicalFormDialog({
             <AlertDialogAction
               onClick={() => {
                 dirtyRef.current = false;
+                // An explicit discard also drops the persisted create-mode
+                // draft — otherwise it would resurrect on the next open.
+                clearChemicalDraft();
+                void clearDraftPdf();
+                lastFileRef.current = null;
                 setShowDiscardConfirm(false);
                 onClose();
               }}
