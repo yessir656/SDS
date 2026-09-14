@@ -437,7 +437,7 @@ function HazardsTab({ chemical }: { chemical: ChemicalRecord }) {
         ) : (
           <div className="flex flex-wrap gap-4">
             {chemical.ghsPictograms.map((p) => (
-              <GhsPictogramBadge key={p} pictogram={p} size={72} className="w-24" />
+              <GhsPictogramBadge key={p} pictogram={p} size={96} className="w-28" />
             ))}
           </div>
         )}

@@ -121,7 +121,7 @@ export function EmergencyView() {
                 key={p}
                 className="flex items-center gap-2.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5"
               >
-                <GhsPictogram pictogram={p} size={42} />
+                <GhsPictogram pictogram={p} size={52} />
                 <span className="text-sm font-semibold text-gray-900">
                   {p
                     .split("-")

@@ -77,7 +77,7 @@ function ChemicalCardInner({ chemical }: ChemicalCardProps) {
         {chemical.ghsPictograms.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {chemical.ghsPictograms.map((p) => (
-              <GhsPictogram key={p} pictogram={p} size={38} />
+              <GhsPictogram key={p} pictogram={p} size={48} />
             ))}
           </div>
         )}
