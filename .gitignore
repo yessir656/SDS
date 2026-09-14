@@ -64,3 +64,6 @@ prisma/db/*.db-journal
 
 # Process PID files
 *.pid
+
+# Session tool-output artifacts (regenerate every session)
+/tool-results/
