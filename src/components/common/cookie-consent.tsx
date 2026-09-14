@@ -57,8 +57,8 @@ export function CookieConsent() {
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-3 sm:bottom-4 sm:pb-4">
         <div
           className="
-            pointer-events-auto mx-auto flex max-w-3xl items-start gap-3
-            rounded-xl border border-border bg-card px-4 py-3
+            pointer-events-auto relative mx-auto flex max-w-3xl items-start gap-3
+            overflow-hidden rounded-xl border border-border bg-card px-4 py-3
             sm:items-center sm:rounded-2xl sm:px-5 sm:py-4
           "
         >

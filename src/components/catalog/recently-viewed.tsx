@@ -75,11 +75,24 @@ export function RecentlyViewed({ hasActiveQuery }: { hasActiveQuery: boolean }) 
           const isLoadingThis = loadingId === c.id;
           return (
             <li key={c.id} className="contents">
-              <button
+              {/* ARIA button (not a real <button>) because the remove chip is
+                  an interactive element nested inside — a <button> can't
+                  contain interactive content (invalid DOM, inconsistent
+                  click behavior across browsers). Enter/Space still works. */}
+              <div
+                role="button"
+                tabIndex={0}
+                aria-disabled={isLoadingThis}
                 onClick={() => openRecent(c.id)}
-                disabled={isLoadingThis}
+                onKeyDown={(e) => {
+                  if (isLoadingThis) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openRecent(c.id);
+                  }
+                }}
                 className={cn(
-                  "group flex w-full items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2 text-left transition-all hover:border-mirdc-cyan/50 hover:shadow-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mirdc-cyan disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+                  "group flex w-full cursor-pointer items-center gap-2.5 rounded-xl border border-border bg-background px-3 py-2 text-left transition-all hover:border-mirdc-cyan/50 hover:shadow-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mirdc-cyan aria-disabled:cursor-wait aria-disabled:opacity-60 sm:w-auto"
                 )}
               >
                 <span
@@ -125,7 +138,7 @@ export function RecentlyViewed({ hasActiveQuery }: { hasActiveQuery: boolean }) 
                 >
                   <X className="h-3 w-3" />
                 </span>
-              </button>
+              </div>
             </li>
           );
         })}
