@@ -497,7 +497,7 @@ export function BulkImportDialog({
 
           {/* Progress list */}
           {rows.length > 0 && (
-            <div className="max-h-56 space-y-1 overflow-x-hidden overflow-y-auto rounded-md border p-2">
+            <div className="max-h-72 space-y-1 overflow-x-hidden overflow-y-auto rounded-md border p-2">
               {rows.map((r, i) => {
                 const canRetry =
                   !running &&
@@ -509,70 +509,78 @@ export function BulkImportDialog({
                 return (
                   <div
                     key={`${r.fileName}-${i}`}
-                    className="flex items-center gap-2 text-xs"
+                    className="flex flex-col gap-0.5 rounded-md px-1 py-1 text-xs odd:bg-muted/40"
                   >
-                    <span className="min-w-0 flex-1 truncate" title={r.fileName}>
-                      {r.fileName}
-                    </span>
-                    {r.method && (
-                      <Badge variant="outline" className="shrink-0 text-[9px]">
-                        {r.method}
-                      </Badge>
-                    )}
-                    <span
-                      className={
-                        "shrink-0 font-medium " +
-                        (r.status === "created"
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : r.status === "failed" || r.status === "partial"
-                            ? "text-red-600 dark:text-red-400"
-                            : r.status === "duplicate"
-                              ? "text-amber-600 dark:text-amber-400"
-                              : "text-muted-foreground")
-                      }
-                    >
-                      {(r.status === "extracting" || r.status === "creating") && (
-                        <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="min-w-0 flex-1 truncate font-medium"
+                        title={r.fileName}
+                      >
+                        {r.fileName}
+                      </span>
+                      {r.method && (
+                        <Badge variant="outline" className="shrink-0 text-[9px]">
+                          {r.method}
+                        </Badge>
                       )}
-                      {STATUS_LABELS[r.status]}
-                    </span>
-                    {(r.chemicalId || r.error) && (
                       <span
                         className={
-                          "min-w-0 flex-1 truncate " +
-                          (r.error
-                            ? "text-red-600/80 dark:text-red-400/80"
-                            : "text-muted-foreground")
-                        }
-                        title={[r.chemicalId, r.error].filter(Boolean).join(" — ")}
-                      >
-                        {r.chemicalId ? `· ${r.chemicalId}` : ""}
-                        {r.error ? ` — ${r.error}` : ""}
-                      </span>
-                    )}
-                    {canRetry && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-6 shrink-0 gap-1 px-1.5 text-[10px]"
-                        onClick={() => retryRowWithAi(i)}
-                        disabled={anyRetrying}
-                        title={
-                          r.status === "failed"
-                            ? "Re-run this file through the AI extraction and import it"
-                            : "Re-read this file with AI and update the imported chemical"
+                          "shrink-0 font-medium " +
+                          (r.status === "created"
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : r.status === "failed" || r.status === "partial"
+                              ? "text-red-600 dark:text-red-400"
+                              : r.status === "duplicate"
+                                ? "text-amber-600 dark:text-amber-400"
+                                : "text-muted-foreground")
                         }
                       >
-                        <RefreshCw className="h-3 w-3" />
-                        Retry with AI
-                      </Button>
-                    )}
-                    {r.retrying && (
-                      <span className="shrink-0 font-medium text-violet-700 dark:text-violet-300">
-                        <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-                        Retrying with AI…
+                        {(r.status === "extracting" || r.status === "creating") && (
+                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                        )}
+                        {STATUS_LABELS[r.status]}
                       </span>
+                      {canRetry && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-6 shrink-0 gap-1 px-1.5 text-[10px]"
+                          onClick={() => retryRowWithAi(i)}
+                          disabled={anyRetrying}
+                          title={
+                            r.status === "failed"
+                              ? "Re-run this file through the AI extraction and import it"
+                              : "Re-read this file with AI and update the imported chemical"
+                          }
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Retry with AI
+                        </Button>
+                      )}
+                      {r.retrying && (
+                        <span className="shrink-0 font-medium text-violet-700 dark:text-violet-300">
+                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                          Retrying…
+                        </span>
+                      )}
+                    </div>
+                    {(r.chemicalId || r.error) && (
+                      <div className="min-w-0 pl-1">
+                        {r.chemicalId && (
+                          <div className="truncate text-[11px] text-muted-foreground">
+                            Saved as: {r.chemicalId}
+                          </div>
+                        )}
+                        {r.error && (
+                          <div
+                            className="line-clamp-2 text-[11px] leading-snug text-red-600 dark:text-red-400"
+                            title={r.error}
+                          >
+                            {r.error}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 );
