@@ -20,7 +20,7 @@ fi
 case "${DATABASE_URL:-}" in
     file:*) db_path="${DATABASE_URL#file:}" ;;
     *)
-        echo "DATABASE_URL must be an absolute SQLite file URL" >&2
+        echo "DATABASE_URL must be an absolute SQLite file URLs" >&2
         exit 1
         ;;
 esac
