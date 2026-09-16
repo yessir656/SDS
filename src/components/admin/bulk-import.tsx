@@ -497,7 +497,7 @@ export function BulkImportDialog({
 
           {/* Progress list */}
           {rows.length > 0 && (
-            <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
+            <div className="max-h-56 space-y-1 overflow-x-hidden overflow-y-auto rounded-md border p-2">
               {rows.map((r, i) => {
                 const canRetry =
                   !running &&
@@ -535,9 +535,21 @@ export function BulkImportDialog({
                         <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
                       )}
                       {STATUS_LABELS[r.status]}
-                      {r.chemicalId ? ` · ${r.chemicalId}` : ""}
-                      {r.error ? ` — ${r.error}` : ""}
                     </span>
+                    {(r.chemicalId || r.error) && (
+                      <span
+                        className={
+                          "min-w-0 flex-1 truncate " +
+                          (r.error
+                            ? "text-red-600/80 dark:text-red-400/80"
+                            : "text-muted-foreground")
+                        }
+                        title={[r.chemicalId, r.error].filter(Boolean).join(" — ")}
+                      >
+                        {r.chemicalId ? `· ${r.chemicalId}` : ""}
+                        {r.error ? ` — ${r.error}` : ""}
+                      </span>
+                    )}
                     {canRetry && (
                       <Button
                         type="button"
