@@ -7,6 +7,7 @@
 //   ?action=<prefix>   — filter by action prefix (e.g. "user." or "chemical.")
 //   ?entityType=<val>  — filter by entity type
 //   ?actorId=<val>     — filter by actor
+//   ?q=<text>          — free-text search (actor email, action, summary, entity)
 // ============================================================================
 
 import { NextResponse } from "next/server";
@@ -31,12 +32,23 @@ export async function GET(request: Request) {
   const actionPrefix = url.searchParams.get("action");
   const entityType = url.searchParams.get("entityType");
   const actorId = url.searchParams.get("actorId");
+  const q = url.searchParams.get("q")?.trim();
 
   // Build the where clause.
   const where: Record<string, unknown> = {};
   if (entityType) where.entityType = entityType;
   if (actorId) where.actorId = actorId;
   if (actionPrefix) where.action = { startsWith: actionPrefix };
+  if (q) {
+    // SQLite `contains` is case-insensitive for ASCII via LIKE.
+    where.OR = [
+      { actorEmail: { contains: q } },
+      { action: { contains: q } },
+      { summary: { contains: q } },
+      { entityId: { contains: q } },
+      { entityType: { contains: q } },
+    ];
+  }
 
   // Cursor pagination: createdAt < cursor (newest-first ordering).
   if (cursor) {

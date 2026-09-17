@@ -18,8 +18,10 @@ import {
   ChevronRight,
   Filter,
   Activity,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -94,6 +96,13 @@ export function AuditLogViewer() {
   // Filters
   const [entityType, setEntityType] = useState<string>("all");
   const [actionPrefix, setActionPrefix] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,19 +110,21 @@ export function AuditLogViewer() {
       const params = new URLSearchParams({ limit: "50" });
       if (entityType !== "all") params.set("entityType", entityType);
       if (actionPrefix !== "all") params.set("action", actionPrefix);
+      if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
       const res = await fetch(`/api/admin/audit?${params}`, { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to load audit log");
       const data = await res.json();
       setEntries(data.entries);
       setNextCursor(data.nextCursor);
       setHasMore(data.hasMore);
+      setExpanded(new Set());
     } catch (err) {
       console.error(err);
       setEntries([]);
     } finally {
       setLoading(false);
     }
-  }, [entityType, actionPrefix]);
+  }, [entityType, actionPrefix, debouncedSearch]);
 
   useEffect(() => {
     void load();
@@ -129,6 +140,7 @@ export function AuditLogViewer() {
       });
       if (entityType !== "all") params.set("entityType", entityType);
       if (actionPrefix !== "all") params.set("action", actionPrefix);
+      if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
       const res = await fetch(`/api/admin/audit?${params}`, { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to load more");
       const data = await res.json();
@@ -162,7 +174,20 @@ export function AuditLogViewer() {
             {entries.length} shown
           </Badge>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="relative w-full sm:w-56">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Label htmlFor="al-search" className="sr-only">
+              Search audit log
+            </Label>
+            <Input
+              id="al-search"
+              className="h-9 pl-8"
+              placeholder="Search actor, action, summary…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <Label htmlFor="al-entity" className="sr-only">
@@ -213,9 +238,10 @@ export function AuditLogViewer() {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : entries.length === 0 ? (
-            <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-              No audit entries yet. Try creating, editing, or deleting a
-              chemical to see activity here.
+            <div className="flex h-40 items-center justify-center px-4 text-center text-sm text-muted-foreground">
+              {debouncedSearch.trim()
+                ? `No audit entries match “${debouncedSearch.trim()}”.`
+                : "No audit entries yet. Try creating, editing, or deleting a chemical to see activity here."}
             </div>
           ) : (
             <div className="overflow-x-auto">

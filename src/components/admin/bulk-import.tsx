@@ -24,7 +24,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { generateChemicalId } from "@/lib/slug";
-import { Files, Loader2, RefreshCw, X } from "lucide-react";
+import { Check, Files, Loader2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,6 +36,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DEPARTMENTS } from "@/types";
 
 type RowStatus =
@@ -45,7 +55,8 @@ type RowStatus =
   | "created" // chemical + real SDS attached
   | "partial" // chemical created but SDS attach failed
   | "duplicate"
-  | "failed";
+  | "failed"
+  | "cancelled"; // admin discarded while this file was queued/in-flight
 
 interface ResultRow {
   fileName: string;
@@ -65,6 +76,7 @@ const STATUS_LABELS: Record<RowStatus, string> = {
   partial: "Imported (SDS attach failed)",
   duplicate: "Skipped — CAS already in catalog",
   failed: "Failed",
+  cancelled: "Cancelled",
 };
 
 /** Derive a schema-valid id slug from an extracted chemical name + manufacturer.
@@ -142,16 +154,25 @@ export function BulkImportDialog({
   const [running, setRunning] = useState(false);
   const [rows, setRows] = useState<ResultRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [closeConfirm, setCloseConfirm] = useState<null | "discard" | "running">(
+    null
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   // CAS numbers already in the catalog — preloaded when the dialog opens.
   const existingCasRef = useRef<Set<string>>(new Set());
+  // Batch cancellation: "Discard" while importing aborts the in-flight file
+  // and stops the queue.
+  const abortRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
 
   // Summary is derived from the rows (not incremental counters) so per-row
   // "Retry with AI" keeps the numbers accurate. Shown once every row is done.
   const summary = useMemo(() => {
     if (rows.length === 0) return null;
     const allDone = rows.every((r) =>
-      ["created", "partial", "duplicate", "failed"].includes(r.status)
+      ["created", "partial", "duplicate", "failed", "cancelled"].includes(
+        r.status
+      )
     );
     if (!allDone) return null;
     return {
@@ -164,10 +185,58 @@ export function BulkImportDialog({
   }, [rows]);
 
   const anyRetrying = rows.some((r) => r.retrying);
+  const busyRef = useRef(false);
+  busyRef.current = running || anyRetrying;
 
-  // Preload existing CAS numbers each time the dialog opens.
+  // Close guard — same pattern as the Add Chemical form, never a silent
+  // lockout: while a batch/retry runs, closing asks "close anyway?" (the
+  // run continues in the background); otherwise pending work asks
+  // "keep editing or discard".
+  const requestClose = () => {
+    if (running || anyRetrying) {
+      setCloseConfirm("running");
+      return;
+    }
+    // A fully successful import (everything imported or skipped as duplicate)
+    // closes directly — nothing to lose. The confirm only appears when there
+    // is something to lose: files never imported, or failed/partial/cancelled
+    // rows the admin may still want to review.
+    const needsReview =
+      files.length > 0 &&
+      rows.some((r) =>
+        [
+          "pending",
+          "extracting",
+          "creating",
+          "failed",
+          "partial",
+          "cancelled",
+        ].includes(r.status)
+      );
+    if (needsReview) {
+      setCloseConfirm("discard");
+      return;
+    }
+    onOpenChange(false);
+  };
+
+  // Warn before an accidental tab/browser close while the batch runs.
+  useEffect(() => {
+    if (!running) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [running]);
+
+  // Preload existing CAS numbers each time the dialog opens. When it reopens
+  // while a batch/retry is still running in the background, keep the live
+  // report instead of wiping state mid-pipeline.
   useEffect(() => {
     if (!open) return;
+    if (busyRef.current) return;
     setFiles([]);
     setRows([]);
     setError(null);
@@ -196,10 +265,12 @@ export function BulkImportDialog({
   /** Run the full per-file pipeline (extract → duplicate check → create →
    *  attach the real SDS PDF) for one file, updating its row live. Returns
    *  the row's final status. forceAI=true skips the free local tiers and
-   *  goes straight to the vision model (the "Retry with AI" path). */
+   *  goes straight to the vision model (the "Retry with AI" path).
+   *  signal — abort signal from batch cancellation ("Discard" mid-import). */
   const processFile = async (
     index: number,
-    forceAI: boolean
+    forceAI: boolean,
+    signal?: AbortSignal
   ): Promise<RowStatus> => {
     const file = files[index];
 
@@ -212,6 +283,7 @@ export function BulkImportDialog({
       const exRes = await fetch("/api/admin/sds/extract", {
         method: "POST",
         body: fd,
+        signal,
       });
       const exJson = await exRes.json().catch(() => null);
       if (!exRes.ok || !exJson?.success) {
@@ -254,6 +326,7 @@ export function BulkImportDialog({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
+          signal,
         });
         if (r.status === 409) continue; // id collision → next suffix
         createRes = r;
@@ -282,6 +355,7 @@ export function BulkImportDialog({
         const sdsRes = await fetch("/api/admin/sds", {
           method: "POST",
           body: sfd,
+          signal,
         });
         if (!sdsRes.ok) {
           const sj = await sdsRes.json().catch(() => null);
@@ -302,6 +376,10 @@ export function BulkImportDialog({
       updateRow(index, { status: "created", chemicalId: finalId });
       return "created";
     } catch (err) {
+      if (signal?.aborted) {
+        updateRow(index, { status: "cancelled" });
+        return "cancelled";
+      }
       updateRow(index, {
         status: "failed",
         error: err instanceof Error ? err.message : String(err),
@@ -314,15 +392,33 @@ export function BulkImportDialog({
     if (files.length === 0 || running) return;
     setRunning(true);
     setError(null);
+    cancelledRef.current = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     let failedCount = 0;
+    let cancelled = false;
     for (let i = 0; i < files.length; i++) {
-      const status = await processFile(i, false);
+      if (cancelledRef.current) {
+        cancelled = true;
+        break;
+      }
+      const status = await processFile(i, false, controller.signal);
       if (status === "failed") failedCount++;
     }
 
+    // Files still queued when the admin discarded are marked cancelled.
+    if (cancelled) {
+      setRows((prev) =>
+        prev.map((r) =>
+          r.status === "pending" ? { ...r, status: "cancelled" } : r
+        )
+      );
+    }
+
+    abortRef.current = null;
     setRunning(false);
-    if (failedCount > 0) {
+    if (!cancelled && failedCount > 0) {
       setError(
         `${failedCount} of ${files.length} file(s) failed — see rows below. Individual rows can be retried with AI.`
       );
@@ -340,7 +436,7 @@ export function BulkImportDialog({
     const file = files[index];
     if (!row || !file || row.retrying || running) return;
 
-    if (row.status === "failed") {
+    if (row.status === "failed" || row.status === "cancelled") {
       updateRow(index, { retrying: true, error: undefined });
       try {
         await processFile(index, true);
@@ -426,13 +522,15 @@ export function BulkImportDialog({
   };
 
   const doneCount = rows.filter((r) =>
-    ["created", "partial", "duplicate", "failed"].includes(r.status)
+    ["created", "partial", "duplicate", "failed", "cancelled"].includes(r.status)
   ).length;
 
   return (
     <Dialog
       open={open}
-      onOpenChange={(o) => !running && !anyRetrying && onOpenChange(o)}
+      onOpenChange={(o) => {
+        if (!o) requestClose();
+      }}
     >
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
@@ -497,90 +595,71 @@ export function BulkImportDialog({
 
           {/* Progress list */}
           {rows.length > 0 && (
-            <div className="max-h-72 space-y-1 overflow-x-hidden overflow-y-auto rounded-md border p-2">
+            <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
               {rows.map((r, i) => {
                 const canRetry =
                   !running &&
                   !r.retrying &&
                   (r.status === "failed" ||
+                    r.status === "cancelled" ||
                     ((r.status === "created" || r.status === "partial") &&
                       !!r.chemicalId &&
                       r.method !== "ai"));
                 return (
                   <div
                     key={`${r.fileName}-${i}`}
-                    className="flex flex-col gap-0.5 rounded-md px-1 py-1 text-xs odd:bg-muted/40"
+                    className="flex items-center gap-2 text-xs"
                   >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="min-w-0 flex-1 truncate font-medium"
-                        title={r.fileName}
-                      >
-                        {r.fileName}
-                      </span>
-                      {r.method && (
-                        <Badge variant="outline" className="shrink-0 text-[9px]">
-                          {r.method}
-                        </Badge>
+                    <span className="min-w-0 flex-1 truncate" title={r.fileName}>
+                      {r.fileName}
+                    </span>
+                    {r.method && (
+                      <Badge variant="outline" className="shrink-0 text-[9px]">
+                        {r.method}
+                      </Badge>
+                    )}
+                    <span
+                      className={
+                        "shrink-0 font-medium " +
+                        (r.status === "created"
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : r.status === "failed" || r.status === "partial"
+                            ? "text-red-600 dark:text-red-400"
+                            : r.status === "duplicate"
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-muted-foreground")
+                      }
+                    >
+                      {(r.status === "extracting" || r.status === "creating") && (
+                        <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
                       )}
-                      <span
-                        className={
-                          "shrink-0 font-medium " +
-                          (r.status === "created"
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : r.status === "failed" || r.status === "partial"
-                              ? "text-red-600 dark:text-red-400"
-                              : r.status === "duplicate"
-                                ? "text-amber-600 dark:text-amber-400"
-                                : "text-muted-foreground")
+                      {STATUS_LABELS[r.status]}
+                      {r.chemicalId ? ` · ${r.chemicalId}` : ""}
+                      {r.error ? ` — ${r.error}` : ""}
+                    </span>
+                    {canRetry && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 shrink-0 gap-1 px-1.5 text-[10px]"
+                        onClick={() => retryRowWithAi(i)}
+                        disabled={anyRetrying}
+                        title={
+                          r.status === "failed"
+                            ? "Re-run this file through the AI extraction and import it"
+                            : "Re-read this file with AI and update the imported chemical"
                         }
                       >
-                        {(r.status === "extracting" || r.status === "creating") && (
-                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-                        )}
-                        {STATUS_LABELS[r.status]}
+                        <RefreshCw className="h-3 w-3" />
+                        Retry with AI
+                      </Button>
+                    )}
+                    {r.retrying && (
+                      <span className="shrink-0 font-medium text-violet-700 dark:text-violet-300">
+                        <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
+                        Retrying with AI…
                       </span>
-                      {canRetry && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 shrink-0 gap-1 px-1.5 text-[10px]"
-                          onClick={() => retryRowWithAi(i)}
-                          disabled={anyRetrying}
-                          title={
-                            r.status === "failed"
-                              ? "Re-run this file through the AI extraction and import it"
-                              : "Re-read this file with AI and update the imported chemical"
-                          }
-                        >
-                          <RefreshCw className="h-3 w-3" />
-                          Retry with AI
-                        </Button>
-                      )}
-                      {r.retrying && (
-                        <span className="shrink-0 font-medium text-violet-700 dark:text-violet-300">
-                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />
-                          Retrying…
-                        </span>
-                      )}
-                    </div>
-                    {(r.chemicalId || r.error) && (
-                      <div className="min-w-0 pl-1">
-                        {r.chemicalId && (
-                          <div className="truncate text-[11px] text-muted-foreground">
-                            Saved as: {r.chemicalId}
-                          </div>
-                        )}
-                        {r.error && (
-                          <div
-                            className="line-clamp-2 text-[11px] leading-snug text-red-600 dark:text-red-400"
-                            title={r.error}
-                          >
-                            {r.error}
-                          </div>
-                        )}
-                      </div>
                     )}
                   </div>
                 );
@@ -606,30 +685,74 @@ export function BulkImportDialog({
 
           {/* Actions */}
           <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={running || anyRetrying}
-            >
+            <Button variant="outline" onClick={requestClose}>
               {running || anyRetrying
                 ? "Importing…"
                 : doneCount > 0
                   ? "Close"
                   : "Cancel"}
             </Button>
-            <Button
-              onClick={runBatch}
-              disabled={running || files.length === 0}
-              className="gap-2"
-            >
-              {running && <Loader2 className="h-4 w-4 animate-spin" />}
-              {running
-                ? `Importing ${doneCount}/${files.length}…`
-                : `Import ${files.length || ""} file${files.length === 1 ? "" : "s"}`}
-            </Button>
+            {!running && summary ? (
+              <Button onClick={requestClose} className="gap-2">
+                <Check className="h-4 w-4" />
+                Done
+              </Button>
+            ) : (
+              <Button
+                onClick={runBatch}
+                disabled={running || files.length === 0}
+                className="gap-2"
+              >
+                {running && <Loader2 className="h-4 w-4 animate-spin" />}
+                {running
+                  ? `Importing ${doneCount}/${files.length}…`
+                  : `Import ${files.length || ""} file${files.length === 1 ? "" : "s"}`}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
+
+      {/* Close guard — "running" mode lets the admin leave while the batch
+          keeps going in the background; "discard" mode confirms losing the
+          selected files / report. */}
+      <AlertDialog
+        open={closeConfirm !== null}
+        onOpenChange={(o) => !o && setCloseConfirm(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {closeConfirm === "running"
+                ? "Import still running — close anyway?"
+                : "Discard this import session?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {closeConfirm === "running"
+                ? "Discarding cancels the import — files still queued are stopped and the file currently being read is aborted. Files already imported stay saved in the catalog."
+                : "Closing now will clear the selected files and the per-file report shown below. Chemicals already imported are saved in the catalog — only this report is lost. This cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {closeConfirm === "running" ? "Keep watching" : "Keep editing"}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (closeConfirm === "running") {
+                  cancelledRef.current = true;
+                  abortRef.current?.abort();
+                }
+                setCloseConfirm(null);
+                onOpenChange(false);
+              }}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

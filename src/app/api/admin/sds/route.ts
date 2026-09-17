@@ -197,6 +197,11 @@ export async function POST(request: Request) {
     // Delete the old file from storage.
     await deleteFile(existingSds.storageKey);
 
+    // The auto-generated placeholder is not a real revision — replacing it is
+    // the FIRST real upload, so it stays version 1. Only replacing an
+    // actually uploaded PDF counts as a new version.
+    const replacingReal = existingSds.status !== "placeholder";
+
     sds = await db.sdsDocument.update({
       where: { chemicalId },
       data: {
@@ -206,7 +211,7 @@ export async function POST(request: Request) {
         mimeType: "application/pdf",
         contentHash,
         status: "available",
-        version: { increment: 1 },
+        version: replacingReal ? { increment: 1 } : 1,
         uploadedById: session.user.id,
       },
     });
@@ -236,12 +241,13 @@ export async function POST(request: Request) {
   });
 
   const ctx = auditContext(session, request);
+  const replacedReal = !!existingSds && existingSds.status !== "placeholder";
   await logAction({
     ctx,
-    action: existingSds ? "sds.replace" : "sds.upload",
+    action: replacedReal ? "sds.replace" : "sds.upload",
     entityType: "sds",
     entityId: sds.id,
-    summary: `${existingSds ? "Replaced" : "Uploaded"} SDS for "${chemical.chemicalName}" (v${sds.version}, ${file.name})`,
+    summary: `${replacedReal ? "Replaced" : "Uploaded"} SDS for "${chemical.chemicalName}" (v${sds.version}, ${file.name})`,
     after: { chemicalId, version: sds.version, fileName: file.name, size: buffer.length },
   });
 
